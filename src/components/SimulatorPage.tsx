@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { NodeIndicator, Dimension, Edge, Intervention, Shock, SimulationResult } from "../types";
 import { dataService } from "../dataService";
+import { runSimulationClient, SimulationPayload } from "../lib/simulationClient";
 import { Play, Pause, RefreshCw, Download, Plus, Trash2, Sliders, BarChart4, Network, HelpCircle, AlertTriangle } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -238,7 +239,8 @@ export default function SimulatorPage() {
       payloadShocks[s.node] = s.intensity;
     });
 
-    const payload = {
+
+    const payload: SimulationPayload = {
       nodes,
       edges,
       dimensions,
@@ -254,23 +256,12 @@ export default function SimulatorPage() {
     };
 
     try {
-      const res = await fetch("/api/simulate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Simulation failed to execute on server.");
-      }
-
-      setSimResult(data);
+      // Run the simulation entirely in the browser
+      const result = runSimulationClient(payload);
+      setSimResult(result);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err?.message || "An unexpected error occurred during simulation.");
+      setErrorMsg(err?.message || "An unexpected error occurred during client-side simulation.");
     } finally {
       setSimulating(false);
     }
