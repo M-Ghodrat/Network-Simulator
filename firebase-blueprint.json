@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Dimension": {
+      "title": "Dimension",
+      "description": "A resilience dimension clustering multiple nodes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique dimension ID" },
+        "name": { "type": "string", "description": "Name of the dimension" }
+      },
+      "required": ["id", "name"]
+    },
+    "NodeIndicator": {
+      "title": "NodeIndicator",
+      "description": "A node within the resilience network",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the node (same as abbr)" },
+        "abbr": { "type": "string", "description": "Abbreviation of the node name" },
+        "full_name": { "type": "string", "description": "Full descriptive name of the node" },
+        "dimension_id": { "type": "string", "description": "ID of the parent dimension" },
+        "theta": { "type": "number", "description": "Threshold" },
+        "recovery_rate": { "type": "number", "description": "Recovery rate" }
+      },
+      "required": ["id", "abbr", "full_name", "dimension_id"]
+    },
+    "Edge": {
+      "title": "Edge",
+      "description": "A directed connection between source and target nodes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique edge identifier" },
+        "source": { "type": "string", "description": "Source node abbreviation" },
+        "target": { "type": "string", "description": "Target node abbreviation" }
+      },
+      "required": ["id", "source", "target"]
+    },
+    "SimulatorParams": {
+      "title": "SimulatorParams",
+      "description": "Global parameters and scenarios for the simulation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Configuration scenario ID (e.g., 'default')" },
+        "T": { "type": "integer", "description": "Simulation time steps" },
+        "theta": { "type": "number", "description": "Global default threshold value" },
+        "gamma": { "type": "number", "description": "Scaling constant for interaction intensity" },
+        "epsilon": { "type": "number", "description": "Tolerance value for convergence" },
+        "rv": { "type": "number", "description": "Global default recovery rate" },
+        "shocks": {
+          "type": "array",
+          "description": "List of active shocks applied to nodes"
+        },
+        "interventions": {
+          "type": "array",
+          "description": "List of active interventions scheduled"
+        }
+      },
+      "required": ["id", "T", "theta", "gamma", "epsilon", "rv"]
+    }
+  },
+  "firestore": {
+    "dimensions/{dimensionId}": {
+      "schema": "Dimension",
+      "description": "The resilience dimensions"
+    },
+    "nodes/{nodeId}": {
+      "schema": "NodeIndicator",
+      "description": "The network nodes"
+    },
+    "edges/{edgeId}": {
+      "schema": "Edge",
+      "description": "The directed network edges"
+    },
+    "params/{paramId}": {
+      "schema": "SimulatorParams",
+      "description": "Persistent simulation parameter profiles"
+    }
+  }
+}
