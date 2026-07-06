@@ -133,7 +133,7 @@ export default function ConfigPage() {
         setLoading(true);
         try {
           await dataService.importDefaultNetwork();
-          showFeedback("Default URSA network structure (40 nodes, 7 dimensions, and parsed edges) loaded successfully!", "success");
+          showFeedback("Default network structure loaded successfully!", "success");
         } catch (err: any) {
           console.error(err);
           showFeedback(`Seeding failed: ${err?.message || err}`, "error");
@@ -670,7 +670,7 @@ export default function ConfigPage() {
                     >
                       <option value="all">All Dimensions</option>
                       {dimensions.map((d) => (
-                        <option key={d.id} value={d.id}>Dim {d.id}</option>
+                        <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
                   </div>

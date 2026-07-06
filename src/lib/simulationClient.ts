@@ -10,7 +10,7 @@ export interface SimulationResult {
 
 export interface NodeData {
   abbr: string;
-  dimension_id: number;
+  dimension_id: string | number;
   theta?: number;
   recovery_rate?: number;
   [key: string]: any;
@@ -24,7 +24,7 @@ export interface EdgeData {
 }
 
 export interface DimensionData {
-  id: number;
+  id: string | number;
   name: string;
   [key: string]: any;
 }

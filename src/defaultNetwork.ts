@@ -177,3 +177,55 @@ export function parseDefaultEdges(): Edge[] {
 
   return edges;
 }
+
+
+
+export const SIMPLE_DIMENSIONS: Dimension[] = [
+  { id: "1", name: "Dimension 1" },
+  { id: "2", name: "Dimension 2" },
+  { id: "3", name: "Dimension 3" },
+  { id: "4", name: "Dimension 4" }
+];
+
+export const SIMPLE_NODES: NodeIndicator[] = [
+  { id: "n1", abbr: "N1", full_name: "Indicator 1", dimension_id: "1", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n2", abbr: "N2", full_name: "Indicator 2", dimension_id: "1", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n3", abbr: "N3", full_name: "Indicator 3", dimension_id: "1", theta: 0.2, recovery_rate: 0.01 },
+
+  { id: "n4", abbr: "N4", full_name: "Indicator 4", dimension_id: "2", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n5", abbr: "N5", full_name: "Indicator 5", dimension_id: "2", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n6", abbr: "N6", full_name: "Indicator 6", dimension_id: "2", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n7", abbr: "N7", full_name: "Indicator 7", dimension_id: "2", theta: 0.2, recovery_rate: 0.01 },
+
+  { id: "n8", abbr: "N8", full_name: "Indicator 8", dimension_id: "3", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n9", abbr: "N9", full_name: "Indicator 9", dimension_id: "3", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n10", abbr: "N10", full_name: "Indicator 10", dimension_id: "3", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n11", abbr: "N11", full_name: "Indicator 11", dimension_id: "3", theta: 0.2, recovery_rate: 0.01 },
+
+  { id: "n12", abbr: "N12", full_name: "Indicator 12", dimension_id: "4", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n13", abbr: "N13", full_name: "Indicator 13", dimension_id: "4", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n14", abbr: "N14", full_name: "Indicator 14", dimension_id: "4", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n15", abbr: "N15", full_name: "Indicator 15", dimension_id: "4", theta: 0.2, recovery_rate: 0.01 },
+  { id: "n16", abbr: "N16", full_name: "Indicator 16", dimension_id: "4", theta: 0.2, recovery_rate: 0.01 }
+];
+
+export function parseSimpleEdges(): Edge[] {
+  return [
+    { id: "e1", source: "N1", target: "N2", weight: 1.0 },
+    { id: "e2", source: "N2", target: "N3", weight: 1.0 },
+    { id: "e3", source: "N3", target: "N4", weight: 1.0 },
+    { id: "e4", source: "N4", target: "N5", weight: 1.0 },
+    { id: "e5", source: "N5", target: "N6", weight: 1.0 },
+    { id: "e6", source: "N6", target: "N7", weight: 1.0 },
+    { id: "e7", source: "N7", target: "N8", weight: 1.0 },
+    { id: "e8", source: "N8", target: "N9", weight: 1.0 },
+    { id: "e9", source: "N9", target: "N10", weight: 1.0 },
+    { id: "e10", source: "N10", target: "N11", weight: 1.0 },
+    { id: "e11", source: "N11", target: "N12", weight: 1.0 },
+    { id: "e12", source: "N12", target: "N13", weight: 1.0 },
+    { id: "e13", source: "N13", target: "N14", weight: 1.0 },
+    { id: "e14", source: "N14", target: "N15", weight: 1.0 },
+    { id: "e15", source: "N15", target: "N16", weight: 1.0 },
+    { id: "e16", source: "N16", target: "N1", weight: 1.0 }
+  ];
+}

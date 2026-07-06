@@ -1,7 +1,7 @@
 import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
 import { Dimension, NodeIndicator, Edge, SimulatorParams } from "./types";
-import { DEFAULT_DIMENSIONS, DEFAULT_NODES, parseDefaultEdges } from "./defaultNetwork";
+import { DEFAULT_DIMENSIONS, DEFAULT_NODES, parseDefaultEdges, SIMPLE_DIMENSIONS, SIMPLE_NODES, parseSimpleEdges } from "./defaultNetwork";
 
 type Listener<T> = (data: T[]) => void;
 
@@ -17,6 +17,14 @@ const DEFAULT_PARAMS: SimulatorParams = {
     { node: "BE", intensity: 0.4 }
   ],
   interventions: []
+};
+
+const SIMPLE_PARAMS: SimulatorParams = {
+  ...DEFAULT_PARAMS,
+  shocks: [
+    { node: "N2", intensity: 0.4 },
+    { node: "N10", intensity: 0.4 }
+  ]
 };
 
 class DataService {
@@ -177,10 +185,20 @@ class DataService {
 
 
   private loadDefaults() {
-    this.dimensions = [...DEFAULT_DIMENSIONS];
-    this.nodes = [...DEFAULT_NODES];
-    this.edges = parseDefaultEdges();
-    this.params = { ...DEFAULT_PARAMS };
+    const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
+    
+    if (isAdmin) {
+      this.dimensions = [...DEFAULT_DIMENSIONS];
+      this.nodes = [...DEFAULT_NODES];
+      this.edges = parseDefaultEdges();
+      this.params = { ...DEFAULT_PARAMS };
+    } else {
+      this.dimensions = [...SIMPLE_DIMENSIONS];
+      this.nodes = [...SIMPLE_NODES];
+      this.edges = parseSimpleEdges();
+      this.params = { ...SIMPLE_PARAMS };
+    }
+    
     this.saveToLocalStorageOnly();
     this.notifyAll();
   }
@@ -210,7 +228,8 @@ class DataService {
         if (savedParams) {
           this.params = JSON.parse(savedParams);
         } else {
-          this.params = { ...DEFAULT_PARAMS };
+          const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
+          this.params = isAdmin ? { ...DEFAULT_PARAMS } : { ...SIMPLE_PARAMS };
         }
       } else {
         // Fallback to global defaults for a brand-new user session
@@ -324,22 +343,28 @@ class DataService {
       const uid = this.currentUser.uid;
       try {
         // Clear previous state by writing defaults
-        for (const dim of DEFAULT_DIMENSIONS) {
+        const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
+        const dimsToLoad = isAdmin ? DEFAULT_DIMENSIONS : SIMPLE_DIMENSIONS;
+        const nodesToLoad = isAdmin ? DEFAULT_NODES : SIMPLE_NODES;
+        const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
+
+        for (const dim of dimsToLoad) {
           await setDoc(doc(db, "users", uid, "dimensions", dim.id), dim);
         }
-        for (const node of DEFAULT_NODES) {
+        for (const node of nodesToLoad) {
           await setDoc(doc(db, "users", uid, "nodes", node.id), node);
         }
-        const parsedEdges = parseDefaultEdges();
-        for (let i = 0; i < parsedEdges.length; i += 400) {
+        
+        for (let i = 0; i < edgesToLoad.length; i += 400) {
           const edgeBatch = writeBatch(db);
-          const chunk = parsedEdges.slice(i, i + 400);
+          const chunk = edgesToLoad.slice(i, i + 400);
           chunk.forEach((edge) => {
             edgeBatch.set(doc(db, "users", uid, "edges", edge.id), edge);
           });
           await edgeBatch.commit();
         }
-        await setDoc(doc(db, "users", uid, "params", "default"), DEFAULT_PARAMS);
+        const paramsToLoad = isAdmin ? DEFAULT_PARAMS : SIMPLE_PARAMS;
+        await setDoc(doc(db, "users", uid, "params", "default"), paramsToLoad);
         console.log(`Firestore successfully seeded for user: ${uid}`);
       } catch (e) {
         console.warn("Seeding Firestore failed, running in local-only sandbox:", e);

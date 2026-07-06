@@ -75,11 +75,12 @@ export default function SimulatorPage() {
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Dashboard charting selections
-  const [selectedChartNodes, setSelectedChartNodes] = useState<string[]>(["PF", "BE"]);
+  const [selectedChartNodes, setSelectedChartNodes] = useState<string[]>([]);
   const [newChartNode, setNewChartNode] = useState("");
   
   // Results table filter
   const [tableSearch, setTableSearch] = useState("");
+  const [imageScale, setImageScale] = useState(80);
 
   // Load configuration from dataService
   useEffect(() => {
@@ -92,8 +93,9 @@ export default function SimulatorPage() {
       setNodes(list);
       // Select defaults for new items
       if (list.length > 0) {
-        setNewShockNode((prev) => prev || list.find(n => n.abbr === "PF")?.abbr || list[0].abbr);
-        setNewIntervNode((prev) => prev || list.find(n => n.abbr === "PF")?.abbr || list[0].abbr);
+        const defaultNode = list.find(n => n.abbr === "PF")?.abbr || list.find(n => n.abbr === "N2")?.abbr || list[0].abbr;
+        setNewShockNode((prev) => prev || defaultNode);
+        setNewIntervNode((prev) => prev || defaultNode);
         setNewChartNode((prev) => prev || list[0].abbr);
       }
     });
@@ -157,16 +159,30 @@ export default function SimulatorPage() {
   // Add default demo shock scenario on load
   useEffect(() => {
     if (nodes.length > 0 && shocks.length === 0) {
-      // Seed with PF and BE shocks as default scenario
       const defaultShocks: Shock[] = [];
+      const defaultCharts: string[] = [];
+      
       if (nodes.some(n => n.abbr === "PF")) {
         defaultShocks.push({ node: "PF", intensity: 0.4 });
+        defaultCharts.push("PF");
+      } else if (nodes.some(n => n.abbr === "N2")) {
+        defaultShocks.push({ node: "N2", intensity: 0.4 });
+        defaultCharts.push("N2");
       }
+      
       if (nodes.some(n => n.abbr === "BE")) {
         defaultShocks.push({ node: "BE", intensity: 0.4 });
+        defaultCharts.push("BE");
+      } else if (nodes.some(n => n.abbr === "N10")) {
+        defaultShocks.push({ node: "N10", intensity: 0.4 });
+        defaultCharts.push("N10");
       }
+
       if (defaultShocks.length > 0) {
         setShocks(defaultShocks);
+      }
+      if (defaultCharts.length > 0 && selectedChartNodes.length === 0) {
+        setSelectedChartNodes(defaultCharts);
       }
     }
   }, [nodes]);
@@ -645,18 +661,33 @@ export default function SimulatorPage() {
             <h2 className="text-sm font-bold text-slate-900 font-sans">Network Propagation Cascade Map</h2>
           </div>
           {simResult && (
-            <button
-              onClick={downloadPNG}
-              className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900"
-              title="Download network visualization image"
-            >
-              <Download size={14} />
-            </button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                <span className="font-semibold tracking-wider uppercase">Zoom</span>
+                <input
+                  type="range"
+                  min="50"
+                  max="100"
+                  step="10"
+                  value={imageScale}
+                  onChange={(e) => setImageScale(Number(e.target.value))}
+                  className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+                <span className="w-8 text-right">{imageScale}%</span>
+              </div>
+              <button
+                onClick={downloadPNG}
+                className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900"
+                title="Download network visualization image"
+              >
+                <Download size={14} />
+              </button>
+            </div>
           )}
         </div>
 
         {/* Visualizer Frame */}
-        <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl relative flex items-center justify-center min-h-[580px]" id="visualizer-stage">
+        <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl relative flex items-center justify-center min-h-[580px] overflow-auto" id="visualizer-stage">
           {simulating && (
             <div className="absolute inset-0 bg-slate-100/60 backdrop-blur-xs flex flex-col items-center justify-center gap-3 rounded-xl z-20">
               <RefreshCw size={36} className="animate-spin text-indigo-600" />
@@ -678,7 +709,8 @@ export default function SimulatorPage() {
                 <img
                   src={simResult.plots[selectedWave]}
                   alt={`Wave ${selectedWave}`}
-                  className="w-full h-auto min-h-[600px] object-contain drop-shadow-sm select-none"
+                  style={{ width: `${imageScale}%` }}
+                  className="h-auto object-contain drop-shadow-sm select-none transition-all duration-200"
                   referrerPolicy="no-referrer"
                 />
               ) : (
