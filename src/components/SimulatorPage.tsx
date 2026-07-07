@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { NodeIndicator, Dimension, Edge, Intervention, Shock, SimulationResult } from "../types";
+import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult } from "../types";
 import { dataService } from "../dataService";
 import { runSimulationClient, SimulationPayload } from "../lib/simulationClient";
 import { Play, Pause, RefreshCw, Download, Plus, Trash2, Sliders, BarChart4, Network, HelpCircle, AlertTriangle } from "lucide-react";
@@ -19,7 +19,7 @@ import {
 } from "recharts";
 
 export default function SimulatorPage() {
-  const [dimensions, setDimensions] = useState<Dimension[]>([]);
+  const [domains, setDomains] = useState<Domain[]>([]);
   const [nodes, setNodes] = useState<NodeIndicator[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loadingNodes, setLoadingNodes] = useState(true);
@@ -85,8 +85,8 @@ export default function SimulatorPage() {
   // Load configuration from dataService
   useEffect(() => {
     setLoadingNodes(true);
-    const unsubDims = dataService.subscribeDimensions((list) => {
-      setDimensions(list);
+    const unsubDomains = dataService.subscribeDomains((list) => {
+      setDomains(list);
     });
 
     const unsubNodes = dataService.subscribeNodes((list) => {
@@ -122,7 +122,7 @@ export default function SimulatorPage() {
     });
 
     return () => {
-      unsubDims();
+      unsubDomains();
       unsubNodes();
       unsubEdges();
       unsubParams();
@@ -259,7 +259,7 @@ export default function SimulatorPage() {
     const payload: SimulationPayload = {
       nodes,
       edges,
-      dimensions,
+      domains,
       params: {
         shocks: payloadShocks,
         T,
@@ -314,13 +314,13 @@ export default function SimulatorPage() {
   const getSpilloverBarData = () => {
     if (!simResult || !simResult.domain_spillover[selectedWave]) return [];
     const spillover = simResult.domain_spillover[selectedWave];
-    return Object.entries(spillover).map(([dimId, fraction]) => {
-      const dName = dimensions.find((d) => d.id === dimId)?.name || `Dim ${dimId}`;
+    return Object.entries(spillover).map(([domainId, fraction]) => {
+      const dName = domains.find((d) => d.id === domainId)?.name || `Domain ${domainId}`;
       return {
-        dimension: dName.split(" ").slice(0, 2).join(" "), // shorten for label
+        domain: dName.split(" ").slice(0, 2).join(" "), // shorten for label
         fullName: dName,
         fraction: Number(((fraction as number) * 100).toFixed(1)),
-        id: dimId
+        id: domainId
       };
     });
   };
@@ -330,17 +330,17 @@ export default function SimulatorPage() {
     if (!simResult) return;
     
     const waveCount = simResult.gsi.length;
-    let csvContent = "wave,node_abbr,node_name,dimension,stability\n";
+    let csvContent = "wave,node_abbr,node_name,domain,stability\n";
     
     for (let t = 0; t < waveCount; t++) {
       nodes.forEach((node) => {
         const sVal = simResult.history[node.abbr]?.[t];
         const sValStr = sVal !== undefined ? sVal.toFixed(4) : "1.0000";
-        const dName = dimensions.find(d => d.id === node.dimension_id)?.name || node.dimension_id;
+        const dName = domains.find(d => d.id === node.domain_id)?.name || node.domain_id;
         // Escape quotes
         const nameEscaped = node.full_name.replace(/"/g, '""');
-        const dimEscaped = dName.replace(/"/g, '""');
-        csvContent += `${t},${node.abbr},"${nameEscaped}","${dimEscaped}",${sValStr}\n`;
+        const domainEscaped = dName.replace(/"/g, '""');
+        csvContent += `${t},${node.abbr},"${nameEscaped}","${domainEscaped}",${sValStr}\n`;
       });
     }
 
@@ -365,8 +365,8 @@ export default function SimulatorPage() {
     document.body.removeChild(link);
   };
 
-  // Dimension color mapping helper for text/badges
-  const getDimColor = (id: string) => {
+  // Domain color mapping helper for text/badges
+  const getDomainColor = (id: string) => {
     const map: Record<string, string> = {
       "1": "bg-blue-50 text-blue-700 border-blue-100",
       "2": "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -913,12 +913,12 @@ export default function SimulatorPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={getSpilloverBarData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="dimension" fontSize={8} tickLine={false} />
+                    <XAxis dataKey="domain" fontSize={8} tickLine={false} />
                     <YAxis domain={[0, 100]} fontSize={9} tickFormatter={(v) => `${v}%`} />
                     <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} formatter={(v) => [`${v}%`, "Vulnerable"]} />
                     <Bar dataKey="fraction" fill="#4f46e5" radius={[4, 4, 0, 0]}>
                       {getSpilloverBarData().map((entry, index) => {
-                        // use unique colors matching dimension scheme if possible
+                        // use unique colors matching domain scheme if possible
                         const colors = ["#4169E1", "#2E8B57", "#228B22", "#FF69B4", "#8A2BE2", "#FF8C00", "#D2691E"];
                         return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
                       })}
@@ -926,7 +926,7 @@ export default function SimulatorPage() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <p className="text-[9px] text-slate-400 text-center">Percentage of dimension nodes with stability &lt; 0.3.</p>
+              <p className="text-[9px] text-slate-400 text-center">Percentage of domain nodes with stability &lt; 0.3.</p>
             </div>
 
             {/* SV Table summary */}

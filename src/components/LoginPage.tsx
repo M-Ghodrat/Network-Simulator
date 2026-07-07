@@ -1,112 +1,68 @@
 import React, { useState } from "react";
 import { auth } from "../firebase";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { LogIn, UserPlus, Shield, Activity, HelpCircle, Lock, Mail, AlertCircle, RefreshCw, Key } from "lucide-react";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { LogIn, Shield, Activity, Lock, User, AlertCircle, RefreshCw, Key } from "lucide-react";
 
 interface LoginPageProps {
   onLocalLogin?: (user: any) => void;
 }
 
+const VALID_CREDENTIALS: Record<string, string> = {
+  user1: "user1",
+  user2: "user2",
+  user3: "user3",
+  admin: "admin"
+};
+
 export default function LoginPage({ onLocalLogin }: LoginPageProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError("Please fill in all credentials.");
+    const cleanUsername = username.trim().toLowerCase();
+    
+    if (!cleanUsername || !password) {
+      setError("Please enter both username and password.");
       return;
     }
+
+    // Verify against the 4 pre-authorized sets
+    const expectedPassword = VALID_CREDENTIALS[cleanUsername];
+    if (!expectedPassword || password !== expectedPassword) {
+      setError("Invalid username or password. Please use a pre-authorized account (user1, user2, user3, or admin).");
+      return;
+    }
+
     setLoading(true);
     setError(null);
-    setInfoMessage(null);
 
-    // Automatically pad short passwords behind the scenes to satisfy Firebase Auth (min 6 chars)
+    // Map username to a valid email format under the hood for Firebase Auth compatibility
+    const email = `${cleanUsername}@network.org`;
+    
+    // Auto-pad password behind the scenes to satisfy Firebase Auth min-6-chars constraint
     const finalPassword = password.length < 6 ? password.padEnd(6, "0") : password;
 
     try {
-      if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, finalPassword);
-      } else {
-        await signInWithEmailAndPassword(auth, email, finalPassword);
-      }
-    } catch (err: any) {
-      console.error(err);
-      if (err?.code === "auth/operation-not-allowed") {
-        console.warn("Email/Password auth is not enabled in Firebase Console. Bypassing locally.");
-        const localUserObj = {
-          email: email,
-          uid: "local-" + email.replace(/[^a-zA-Z0-9]/g, "-"),
-          isLocal: true,
-        };
-        localStorage.setItem("ursa_local_user", JSON.stringify(localUserObj));
-        if (onLocalLogin) {
-          onLocalLogin(localUserObj);
-        }
-        return;
-      }
-      let message = "Authentication failed. Please verify your details.";
-      if (err?.code === "auth/email-already-in-use") {
-        message = "This email is already registered.";
-      } else if (err?.code === "auth/invalid-credential") {
-        message = "Incorrect email or password.";
-      } else if (err?.code === "auth/weak-password") {
-        message = "Password must be at least 6 characters.";
-      } else if (err?.message) {
-        message = err.message;
-      }
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    setLoading(true);
-    setError(null);
-    setInfoMessage(null);
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Google Sign-In failed.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Demo / Admin bypass logins
-  const handleBypassLogin = async (bypassEmail: string, bypassPass: string) => {
-    setEmail(bypassEmail);
-    setPassword(bypassPass);
-    setLoading(true);
-    setError(null);
-    setInfoMessage(null);
-    
-    // Auto-pad password behind the scenes to satisfy Firebase Auth rules
-    const finalPass = bypassPass.length < 6 ? bypassPass.padEnd(6, "0") : bypassPass;
-    
-    try {
       try {
-        await signInWithEmailAndPassword(auth, bypassEmail, finalPass);
+        // Try standard sign-in
+        await signInWithEmailAndPassword(auth, email, finalPassword);
       } catch (err: any) {
-        // Handle cases where the bypass user doesn't exist yet
         const code = err?.code || "";
+        // If user doesn't exist yet, automatically register them to provision their account
         if (
           code === "auth/invalid-credential" || 
           code === "auth/user-not-found" || 
           code === "auth/invalid-login-credentials"
         ) {
           try {
-            await createUserWithEmailAndPassword(auth, bypassEmail, finalPass);
+            await createUserWithEmailAndPassword(auth, email, finalPassword);
           } catch (createErr: any) {
             if (createErr?.code === "auth/email-already-in-use") {
-              throw new Error(`The account ${bypassEmail} already exists with a different password. Please sign in manually or register a new account.`);
+              // Fallback to sign-in again with correct credentials
+              await signInWithEmailAndPassword(auth, email, finalPassword);
             } else {
               throw createErr;
             }
@@ -116,11 +72,12 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
         }
       }
     } catch (err: any) {
-      console.warn("Firebase Auth bypass unavailable, switching to secure local bypass fallback.", err);
-      // Fall back to local sandbox bypass for seamless UX
+      console.warn("Firebase Auth is offline or unconfigured. Proceeding with secure local bypass fallback.", err);
+      
+      // Fallback to secure local sandbox bypass
       const localUserObj = {
-        email: bypassEmail,
-        uid: "local-" + bypassEmail.replace(/[^a-zA-Z0-9]/g, "-"),
+        email: email,
+        uid: "local-" + cleanUsername,
         isLocal: true,
       };
       localStorage.setItem("ursa_local_user", JSON.stringify(localUserObj));
@@ -154,30 +111,10 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
         </div>
 
         {/* Form Body */}
-        <div className="p-6 space-y-4" id="login-form-body">
-          <div className="flex border-b border-slate-100 pb-2">
-            <button
-              onClick={() => {
-                setIsSignUp(false);
-                setError(null);
-              }}
-              className={`flex-1 text-center pb-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
-                !isSignUp ? "border-slate-900 text-slate-950" : "border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => {
-                setIsSignUp(true);
-                setError(null);
-              }}
-              className={`flex-1 text-center pb-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
-                isSignUp ? "border-slate-900 text-slate-950" : "border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-            >
-              Register New Account
-            </button>
+        <div className="p-6 space-y-5" id="login-form-body">
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-slate-900">Sign In</h3>
+            <p className="text-xs text-slate-500">Authorized personnel only. Please enter your network credentials.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -191,35 +128,36 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             )}
 
             <div className="space-y-3">
-              {/* Email */}
+              {/* Username */}
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Email Address</label>
+                <label className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Username</label>
                 <div className="relative">
-                  <Mail size={13} className="absolute left-3 top-3 text-slate-400" />
+                  <User size={13} className="absolute left-3 top-3 text-slate-400" />
                   <input
-                    type="email"
+                    type="text"
                     required
-                    placeholder="e.g. planner@network.org"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="e.g. user1, admin"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
+                    autoComplete="username"
                   />
                 </div>
               </div>
 
               {/* Password */}
               <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Account Password</label>
+                <label className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Password</label>
                 <div className="relative">
                   <Lock size={13} className="absolute left-3 top-3 text-slate-400" />
                   <input
                     type="password"
                     required
-                    minLength={6}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
+                    autoComplete="current-password"
                   />
                 </div>
               </div>
@@ -228,14 +166,10 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-1"
+              className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-1 mt-2"
             >
               {loading ? (
                 <RefreshCw size={12} className="animate-spin" />
-              ) : isSignUp ? (
-                <>
-                  <UserPlus size={13} /> Sign Up
-                </>
               ) : (
                 <>
                   <LogIn size={13} /> Sign In
@@ -244,97 +178,32 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             </button>
           </form>
 
-          {/* Google Sign In option (Enabled by default in Firebase) */}
-          <div className="flex items-center gap-2 py-1 text-slate-300">
-            <div className="h-[1px] bg-slate-100 flex-1"></div>
-            <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400">or</span>
-            <div className="h-[1px] bg-slate-100 flex-1"></div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={loading}
-            className="w-full py-2 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.61a5.66 5.66 0 0 1-2.45 3.71v3.08h3.95c2.31-2.13 3.63-5.26 3.63-8.64z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.95-3.08c-1.1.74-2.5 1.18-3.98 1.18-3.07 0-5.67-2.08-6.6-4.88H1.35v3.18A11.996 11.996 0 0 0 12 24z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.4 14.31A7.16 7.16 0 0 1 5 12c0-.8.14-1.58.4-2.31V6.51H1.35A11.99 11.99 0 0 0 0 12c0 2.12.55 4.12 1.5 5.88l3.9-3.57z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.35 2.65 1.35 6.51l3.9 3.57c.93-2.8 3.53-4.88 6.75-4.88z"
-              />
-            </svg>
-            Sign In with Google
-          </button>
-
-          {/* Quick Sandbox Bypass */}
-          <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            <div className="text-center text-[10px] text-slate-400 font-mono">Instant Isolated User Access</div>
-            
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleBypassLogin("user1@network.org", "user1")}
-                disabled={loading}
-                className="py-2.5 px-1 border border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/40 text-indigo-700 hover:bg-indigo-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
-              >
-                <span className="text-xs">User 1</span>
-                <span className="text-[8px] font-mono text-slate-400">pass: user1</span>
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => handleBypassLogin("user2@network.org", "user2")}
-                disabled={loading}
-                className="py-2.5 px-1 border border-dashed border-emerald-200 hover:border-emerald-400 bg-emerald-50/40 text-emerald-700 hover:bg-emerald-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
-              >
-                <span className="text-xs">User 2</span>
-                <span className="text-[8px] font-mono text-slate-400">pass: user2</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleBypassLogin("user3@network.org", "user3")}
-                disabled={loading}
-                className="py-2.5 px-1 border border-dashed border-purple-200 hover:border-purple-400 bg-purple-50/40 text-purple-700 hover:bg-purple-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
-              >
-                <span className="text-xs">User 3</span>
-                <span className="text-[8px] font-mono text-slate-400">pass: user3</span>
-              </button>
+          {/* Help Box with preconfigured credentials */}
+          <div className="pt-4 border-t border-slate-100 space-y-2">
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <Key size={12} />
+              <span className="text-[10px] uppercase font-mono font-bold tracking-wider">Pre-authorized Accounts</span>
             </div>
-
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              <button
-                type="button"
-                onClick={() => handleBypassLogin("admin@network.org", "adminpass123")}
-                disabled={loading}
-                className="py-1.5 px-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200 rounded-lg transition-colors cursor-pointer flex flex-col items-center justify-center"
-              >
-                <span className="font-bold">Bypass as Admin</span>
-                <span className="text-[8px] font-mono text-slate-400">admin@network.org</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBypassLogin("demo@network.org", "demopass123")}
-                disabled={loading}
-                className="py-1.5 px-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200 rounded-lg transition-colors cursor-pointer flex flex-col items-center justify-center"
-              >
-                <span className="font-bold">Bypass as Analyst</span>
-                <span className="text-[8px] font-mono text-slate-400">demo@network.org</span>
-              </button>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+              <div className="flex justify-between py-0.5 border-b border-slate-100/50">
+                <span className="font-medium text-slate-600">user1</span>
+                <span className="font-mono text-slate-400">pass: user1</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-100/50">
+                <span className="font-medium text-slate-600">user2</span>
+                <span className="font-mono text-slate-400">pass: user2</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-100/50">
+                <span className="font-medium text-slate-600">user3</span>
+                <span className="font-mono text-slate-400">pass: user3</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-100/50">
+                <span className="font-medium text-slate-600">admin</span>
+                <span className="font-mono text-slate-400">pass: admin</span>
+              </div>
             </div>
           </div>
+
         </div>
       </div>
     </div>

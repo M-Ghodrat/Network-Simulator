@@ -10,7 +10,7 @@ export interface SimulationResult {
 
 export interface NodeData {
   abbr: string;
-  dimension_id: string | number;
+  domain_id: string | number;
   theta?: number;
   recovery_rate?: number;
   [key: string]: any;
@@ -23,7 +23,7 @@ export interface EdgeData {
   [key: string]: any;
 }
 
-export interface DimensionData {
+export interface DomainData {
   id: string | number;
   name: string;
   [key: string]: any;
@@ -42,7 +42,7 @@ export interface SimulationParams {
 export interface SimulationPayload {
   nodes: NodeData[];
   edges: EdgeData[];
-  dimensions: DimensionData[];
+  domains: DomainData[];
   params: SimulationParams;
 }
 
@@ -144,15 +144,15 @@ function escapeHtml(unsafe: string) {
 function generateSvgPlot(
   nodes_data: NodeData[],
   edges_data: EdgeData[],
-  dimensions_data: DimensionData[],
+  domains_data: DomainData[],
   history: Record<string, number[]>,
   t: number,
   pos: Record<string, [number, number]>,
   centers: Record<string, [number, number]>,
-  dimensions_list: string[],
-  nodes_dim: Record<string, string>
+  domains_list: string[],
+  nodes_domain: Record<string, string>
 ) {
-  const dimColors: Record<string, string> = {
+  const domainColors: Record<string, string> = {
     "1": "#4169E1",
     "2": "#2E8B57",
     "3": "#228B22",
@@ -183,21 +183,21 @@ function generateSvgPlot(
 
   svg_elements.push('  <rect x="-210" y="-200" width="420" height="440" fill="none" />');
 
-  for (const dim_id of dimensions_list) {
-    const dim_nodes = nodes_data.filter(n => String(n.dimension_id) === dim_id).map(n => n.abbr);
-    if (dim_nodes.length === 0) continue;
+  for (const domain_id of domains_list) {
+    const domain_nodes = nodes_data.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);
+    if (domain_nodes.length === 0) continue;
 
-    const color = dimColors[dim_id] || "#777777";
-    const [cx, cy] = centers[dim_id];
+    const color = domainColors[domain_id] || "#777777";
+    const [cx, cy] = centers[domain_id];
 
     const scx = cx * scale;
     const scy = cy * scale;
     const sradius = 3.6 * scale;
     svg_elements.push(`  <circle cx="${scx.toFixed(2)}" cy="${scy.toFixed(2)}" r="${sradius.toFixed(2)}" fill="${color}" opacity="0.07" stroke="${color}" stroke-dasharray="2 2" stroke-width="0.7" />`);
 
-    const dim_obj = dimensions_data.find(d => String(d.id) === dim_id);
-    let dim_name = dim_obj ? dim_obj.name : `Dim ${dim_id}`;
-    dim_name = escapeHtml(dim_name);
+    const domain_obj = domains_data.find(d => String(d.id) === domain_id);
+    let domain_name = domain_obj ? domain_obj.name : `Domain ${domain_id}`;
+    domain_name = escapeHtml(domain_name);
 
     const norm = Math.sqrt(cx*cx + cy*cy);
     let label_x, label_y;
@@ -212,7 +212,7 @@ function generateSvgPlot(
     const slx = label_x * scale;
     const sly = label_y * scale;
 
-    const words = dim_name.split(" ");
+    const words = domain_name.split(" ");
     if (words.length > 2) {
       const mid = Math.floor(words.length / 2);
       const line1 = words.slice(0, mid).join(" ");
@@ -225,7 +225,7 @@ function generateSvgPlot(
     } else {
       svg_elements.push(`  <g>
     <rect x="${(slx - 45).toFixed(1)}" y="${(sly - 7).toFixed(1)}" width="90" height="14" rx="4" fill="white" opacity="0.9" filter="drop-shadow(0px 1px 2px rgba(0,0,0,0.05))" />
-    <text x="${slx.toFixed(1)}" y="${(sly + 3).toFixed(1)}" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">${dim_name}</text>
+    <text x="${slx.toFixed(1)}" y="${(sly + 3).toFixed(1)}" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">${domain_name}</text>
   </g>`);
     }
   }
@@ -259,11 +259,11 @@ function generateSvgPlot(
       s_ux_shrunk = s_ux; s_uy_shrunk = s_uy; s_vx_shrunk = s_vx; s_vy_shrunk = s_vy;
     }
 
-    const same_dim = nodes_dim[u] === nodes_dim[v];
-    const stroke_color = same_dim ? '#94a3b8' : '#64748b';
-    const opacity = same_dim ? 0.5 : 0.22;
-    const stroke_width = same_dim ? 1.0 : 0.8;
-    const marker = same_dim ? 'url(#arrow-same)' : 'url(#arrow)';
+    const same_domain = nodes_domain[u] === nodes_domain[v];
+    const stroke_color = same_domain ? '#94a3b8' : '#64748b';
+    const opacity = same_domain ? 0.5 : 0.22;
+    const stroke_width = same_domain ? 1.0 : 0.8;
+    const marker = same_domain ? 'url(#arrow-same)' : 'url(#arrow)';
 
     const mx = (s_ux_shrunk + s_vx_shrunk) / 2;
     const my = (s_uy_shrunk + s_vy_shrunk) / 2;
@@ -275,7 +275,7 @@ function generateSvgPlot(
       px = 0; py = 0;
     }
 
-    const shift = same_dim ? 10.0 : 16.0;
+    const shift = same_domain ? 10.0 : 16.0;
     const ctrl_x = mx + px * shift;
     const ctrl_y = my + py * shift;
 
@@ -313,7 +313,7 @@ function generateSvgPlot(
 }
 
 export function runSimulationClient(payload: SimulationPayload): SimulationResult {
-  const { nodes, edges, dimensions, params } = payload;
+  const { nodes, edges, domains, params } = payload;
   
   const shocks_raw = params.shocks || {};
   const T = params.T || 8;
@@ -330,12 +330,12 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
 
   const thresholds: Record<string, number> = {};
   const recovery_rates: Record<string, number> = {};
-  const nodes_dim: Record<string, string> = {};
+  const nodes_domain: Record<string, string> = {};
 
   nodes.forEach(node => {
     thresholds[node.abbr] = typeof node.theta === "number" ? node.theta : default_theta;
     recovery_rates[node.abbr] = typeof node.recovery_rate === "number" ? node.recovery_rate : default_recovery_rate;
-    nodes_dim[node.abbr] = String(node.dimension_id);
+    nodes_domain[node.abbr] = String(node.domain_id);
   });
 
   const shocks: Record<string, number> = {};
@@ -434,10 +434,10 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
   const vulnerable_nodes: string[][] = [];
   const domain_spillover: Record<string, number>[] = [];
 
-  const dim_nodes_map: Record<string, string[]> = {};
-  for (const d of dimensions) {
-    const dim_id = String(d.id);
-    dim_nodes_map[dim_id] = nodes.filter(n => String(n.dimension_id) === dim_id).map(n => n.abbr);
+  const domain_nodes_map: Record<string, string[]> = {};
+  for (const d of domains) {
+    const domain_id = String(d.id);
+    domain_nodes_map[domain_id] = nodes.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);
   }
 
   for (let t = 0; t < num_waves; t++) {
@@ -458,9 +458,9 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
     vulnerable_nodes.push(vuln_list);
 
     const wave_spillover: Record<string, number> = {};
-    for (const d of dimensions) {
-      const dim_id = String(d.id);
-      const nodes_in_dim = dim_nodes_map[dim_id] || [];
+    for (const d of domains) {
+      const domain_id = String(d.id);
+      const nodes_in_dim = domain_nodes_map[domain_id] || [];
       if (nodes_in_dim.length > 0) {
         let vuln_in_dim = 0;
         for (const v of nodes_in_dim) {
@@ -468,38 +468,38 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
             vuln_in_dim++;
           }
         }
-        wave_spillover[dim_id] = vuln_in_dim / nodes_in_dim.length;
+        wave_spillover[domain_id] = vuln_in_dim / nodes_in_dim.length;
       } else {
-        wave_spillover[dim_id] = 0.0;
+        wave_spillover[domain_id] = 0.0;
       }
     }
     domain_spillover.push(wave_spillover);
   }
 
-  const dimensions_list = Array.from(new Set(nodes.map(n => String(n.dimension_id)))).sort();
-  const num_dims = dimensions_list.length;
+  const domains_list = Array.from(new Set(nodes.map(n => String(n.domain_id)))).sort();
+  const num_domains = domains_list.length;
   const centers: Record<string, [number, number]> = {};
   
-  dimensions_list.forEach((dim_id, i) => {
-    const angle = num_dims > 0 ? 2 * Math.PI * i / num_dims : 0;
-    centers[dim_id] = [10.0 * Math.cos(angle), 10.0 * Math.sin(angle)];
+  domains_list.forEach((domain_id, i) => {
+    const angle = num_domains > 0 ? 2 * Math.PI * i / num_domains : 0;
+    centers[domain_id] = [10.0 * Math.cos(angle), 10.0 * Math.sin(angle)];
   });
 
   const pos: Record<string, [number, number]> = {};
-  dimensions_list.forEach(dim_id => {
-    const dim_nodes = nodes.filter(n => String(n.dimension_id) === dim_id).map(n => n.abbr);
-    const num_nodes_in_dim = dim_nodes.length;
-    dim_nodes.forEach((node_abbr, j) => {
+  domains_list.forEach(domain_id => {
+    const domain_nodes = nodes.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);
+    const num_nodes_in_dim = domain_nodes.length;
+    domain_nodes.forEach((node_abbr, j) => {
       const node_angle = num_nodes_in_dim > 0 ? 2 * Math.PI * j / num_nodes_in_dim : 0;
       const r = 2.4;
-      const [cx, cy] = centers[dim_id];
+      const [cx, cy] = centers[domain_id];
       pos[node_abbr] = [cx + r * Math.cos(node_angle), cy + r * Math.sin(node_angle)];
     });
   });
 
   const plots: string[] = [];
   for (let t = 0; t < num_waves; t++) {
-    plots.push(generateSvgPlot(nodes, edges, dimensions, history, t, pos, centers, dimensions_list, nodes_dim));
+    plots.push(generateSvgPlot(nodes, edges, domains, history, t, pos, centers, domains_list, nodes_domain));
   }
 
   return {

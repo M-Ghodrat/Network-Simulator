@@ -1,7 +1,7 @@
 import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
-import { Dimension, NodeIndicator, Edge, SimulatorParams } from "./types";
-import { DEFAULT_DIMENSIONS, DEFAULT_NODES, parseDefaultEdges, SIMPLE_DIMENSIONS, SIMPLE_NODES, parseSimpleEdges } from "./defaultNetwork";
+import { Domain, NodeIndicator, Edge, SimulatorParams } from "./types";
+import { DEFAULT_DOMAINS, DEFAULT_NODES, parseDefaultEdges, SIMPLE_DOMAINS, SIMPLE_NODES, parseSimpleEdges } from "./defaultNetwork";
 
 type Listener<T> = (data: T[]) => void;
 
@@ -28,7 +28,7 @@ const SIMPLE_PARAMS: SimulatorParams = {
 };
 
 class DataService {
-  private dimensions: Dimension[] = [];
+  private domains: Domain[] = [];
   private nodes: NodeIndicator[] = [];
   private edges: Edge[] = [];
   private params: SimulatorParams = { ...DEFAULT_PARAMS };
@@ -36,7 +36,7 @@ class DataService {
   private isLoaded = false;
   private currentUser: any = null;
 
-  private dimListeners: Set<Listener<Dimension>> = new Set();
+  private domainListeners: Set<Listener<Domain>> = new Set();
   private nodeListeners: Set<Listener<NodeIndicator>> = new Set();
   private edgeListeners: Set<Listener<Edge>> = new Set();
   private paramsListeners: Set<(p: SimulatorParams) => void> = new Set();
@@ -81,24 +81,24 @@ class DataService {
     const uid = this.currentUser.uid;
 
     try {
-      // Listen to dimensions
+      // Listen to domains
       const unsubDims = onSnapshot(
-        collection(db, "users", uid, "dimensions"),
+        collection(db, "users", uid, "domains"),
         (snapshot) => {
           if (!snapshot.empty) {
-            const list: Dimension[] = [];
-            snapshot.forEach((doc) => list.push(doc.data() as Dimension));
+            const list: Domain[] = [];
+            snapshot.forEach((doc) => list.push(doc.data() as Domain));
             list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-            this.dimensions = list;
+            this.domains = list;
           } else {
-            this.dimensions = [];
+            this.domains = [];
           }
-          this.notifyDimListeners();
+          this.notifyDomainListeners();
           this.saveToLocalStorageOnly();
           this.isLoaded = true;
         },
         (err) => {
-          console.warn("Firestore user dimensions loading failed, using local storage:", err);
+          console.warn("Firestore user domains loading failed, using local storage:", err);
           this.isLocalOnly = true;
           this.notifyStatusListeners();
           this.isLoaded = true;
@@ -188,12 +188,12 @@ class DataService {
     const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
     
     if (isAdmin) {
-      this.dimensions = [...DEFAULT_DIMENSIONS];
+      this.domains = [...DEFAULT_DOMAINS];
       this.nodes = [...DEFAULT_NODES];
       this.edges = parseDefaultEdges();
       this.params = { ...DEFAULT_PARAMS };
     } else {
-      this.dimensions = [...SIMPLE_DIMENSIONS];
+      this.domains = [...SIMPLE_DOMAINS];
       this.nodes = [...SIMPLE_NODES];
       this.edges = parseSimpleEdges();
       this.params = { ...SIMPLE_PARAMS };
@@ -206,7 +206,7 @@ class DataService {
   private getLocalStorageKeys() {
     const uid = this.currentUser ? this.currentUser.uid : "global";
     return {
-      dims: `ursa_dims_${uid}`,
+      domains: `network_domains_${uid}`,
       nodes: `ursa_nodes_${uid}`,
       edges: `ursa_edges_${uid}`,
       params: `ursa_params_${uid}`
@@ -216,13 +216,13 @@ class DataService {
   private loadFromLocalStorage() {
     try {
       const keys = this.getLocalStorageKeys();
-      const savedDims = localStorage.getItem(keys.dims);
+      const savedDomains = localStorage.getItem(keys.domains);
       const savedNodes = localStorage.getItem(keys.nodes);
       const savedEdges = localStorage.getItem(keys.edges);
       const savedParams = localStorage.getItem(keys.params);
 
-      if (savedDims && savedNodes && savedEdges) {
-        this.dimensions = JSON.parse(savedDims);
+      if (savedDomains && savedNodes && savedEdges) {
+        this.domains = JSON.parse(savedDomains);
         this.nodes = JSON.parse(savedNodes);
         this.edges = JSON.parse(savedEdges);
         if (savedParams) {
@@ -244,7 +244,7 @@ class DataService {
   private saveToLocalStorageOnly() {
     try {
       const keys = this.getLocalStorageKeys();
-      localStorage.setItem(keys.dims, JSON.stringify(this.dimensions));
+      localStorage.setItem(keys.domains, JSON.stringify(this.domains));
       localStorage.setItem(keys.nodes, JSON.stringify(this.nodes));
       localStorage.setItem(keys.edges, JSON.stringify(this.edges));
       localStorage.setItem(keys.params, JSON.stringify(this.params));
@@ -253,8 +253,8 @@ class DataService {
     }
   }
 
-  private notifyDimListeners() {
-    this.dimListeners.forEach((listener) => listener([...this.dimensions]));
+  private notifyDomainListeners() {
+    this.domainListeners.forEach((listener) => listener([...this.domains]));
   }
 
   private notifyNodeListeners() {
@@ -274,7 +274,7 @@ class DataService {
   }
 
   private notifyAll() {
-    this.notifyDimListeners();
+    this.notifyDomainListeners();
     this.notifyNodeListeners();
     this.notifyEdgeListeners();
     this.notifyParamsListeners();
@@ -282,10 +282,10 @@ class DataService {
   }
 
   // Real-time Subscriptions
-  public subscribeDimensions(listener: Listener<Dimension>): () => void {
-    this.dimListeners.add(listener);
-    listener([...this.dimensions]);
-    return () => this.dimListeners.delete(listener);
+  public subscribeDomains(listener: Listener<Domain>): () => void {
+    this.domainListeners.add(listener);
+    listener([...this.domains]);
+    return () => this.domainListeners.delete(listener);
   }
 
   public subscribeNodes(listener: Listener<NodeIndicator>): () => void {
@@ -344,12 +344,12 @@ class DataService {
       try {
         // Clear previous state by writing defaults
         const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
-        const dimsToLoad = isAdmin ? DEFAULT_DIMENSIONS : SIMPLE_DIMENSIONS;
+        const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
         const nodesToLoad = isAdmin ? DEFAULT_NODES : SIMPLE_NODES;
         const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
 
-        for (const dim of dimsToLoad) {
-          await setDoc(doc(db, "users", uid, "dimensions", dim.id), dim);
+        for (const domain of domainsToLoad) {
+          await setDoc(doc(db, "users", uid, "domains", domain.id), domain);
         }
         for (const node of nodesToLoad) {
           await setDoc(doc(db, "users", uid, "nodes", node.id), node);
@@ -375,34 +375,34 @@ class DataService {
   }
 
   // CRUD Operations
-  public async saveDimension(dim: Dimension) {
-    const exists = this.dimensions.some(d => d.id === dim.id);
+  public async saveDomain(domain: Domain) {
+    const exists = this.domains.some(d => d.id === domain.id);
     if (exists) {
-      this.dimensions = this.dimensions.map(d => d.id === dim.id ? dim : d);
+      this.domains = this.domains.map(d => d.id === domain.id ? domain : d);
     } else {
-      this.dimensions = [...this.dimensions, dim];
-      this.dimensions.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      this.domains = [...this.domains, domain];
+      this.domains.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
     }
     this.saveToLocalStorageOnly();
-    this.notifyDimListeners();
+    this.notifyDomainListeners();
 
     if (!this.isLocalOnly && this.currentUser) {
       try {
-        await setDoc(doc(db, "users", this.currentUser.uid, "dimensions", dim.id), dim);
+        await setDoc(doc(db, "users", this.currentUser.uid, "domains", domain.id), domain);
       } catch (e) {
         console.warn("Failed to write to Firestore, saved locally:", e);
       }
     }
   }
 
-  public async deleteDimension(id: string) {
-    this.dimensions = this.dimensions.filter(d => d.id !== id);
+  public async deleteDomain(id: string) {
+    this.domains = this.domains.filter(d => d.id !== id);
     this.saveToLocalStorageOnly();
-    this.notifyDimListeners();
+    this.notifyDomainListeners();
 
     if (!this.isLocalOnly && this.currentUser) {
       try {
-        await deleteDoc(doc(db, "users", this.currentUser.uid, "dimensions", id));
+        await deleteDoc(doc(db, "users", this.currentUser.uid, "domains", id));
       } catch (e) {
         console.warn("Failed to write to Firestore, deleted locally:", e);
       }
@@ -465,7 +465,7 @@ class DataService {
 
 
   public async clearNetwork() {
-    this.dimensions = [];
+    this.domains = [];
     this.nodes = [];
     this.edges = [];
     this.saveToLocalStorageOnly();
@@ -474,7 +474,7 @@ class DataService {
     if (!this.isLocalOnly && this.currentUser) {
       const uid = this.currentUser.uid;
       try {
-        const dimsRef = collection(db, "users", uid, "dimensions");
+        const dimsRef = collection(db, "users", uid, "domains");
         const dimsSnap = await getDocs(dimsRef);
         for (const d of dimsSnap.docs) {
           await deleteDoc(d.ref);

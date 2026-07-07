@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Dimension, NodeIndicator, Edge } from "../types";
+import { Domain, NodeIndicator, Edge } from "../types";
 import { dataService } from "../dataService";
 import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 
 export default function ConfigPage() {
-  const [dimensions, setDimensions] = useState<Dimension[]>([]);
+  const [domains, setDomains] = useState<Domain[]>([]);
   const [nodes, setNodes] = useState<NodeIndicator[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,18 +36,18 @@ export default function ConfigPage() {
   };
 
   // Tabs for sub-sections
-  const [activeTab, setActiveTab] = useState<"dimensions" | "nodes" | "edges">("nodes");
+  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges">("nodes");
 
-  // CRUD Form States - Dimensions
-  const [dimForm, setDimForm] = useState({ id: "", name: "" });
-  const [editingDimId, setEditingDimId] = useState<string | null>(null);
+  // CRUD Form States - Domains
+  const [domainForm, setDomainForm] = useState({ id: "", name: "" });
+  const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
 
   // CRUD Form States - Nodes
   const [nodeForm, setNodeForm] = useState({
     id: "",
     abbr: "",
     full_name: "",
-    dimension_id: "1",
+    domain_id: "1",
     theta: 0.2,
     recovery_rate: 0.01
   });
@@ -58,14 +58,14 @@ export default function ConfigPage() {
 
   // Filters / Search
   const [nodeSearch, setNodeSearch] = useState("");
-  const [nodeDimFilter, setNodeDimFilter] = useState("all");
+  const [nodeDomainFilter, setNodeDomainFilter] = useState("all");
   const [edgeSearch, setEdgeSearch] = useState("");
 
   // Subscribing to dataService
   useEffect(() => {
     setLoading(true);
-    const unsubDims = dataService.subscribeDimensions((list) => {
-      setDimensions(list);
+    const unsubDomains = dataService.subscribeDomains((list) => {
+      setDomains(list);
     });
 
     const unsubNodes = dataService.subscribeNodes((list) => {
@@ -82,7 +82,7 @@ export default function ConfigPage() {
     });
 
     return () => {
-      unsubDims();
+      unsubDomains();
       unsubNodes();
       unsubEdges();
       unsubStatus();
@@ -100,7 +100,7 @@ export default function ConfigPage() {
     setModal({
       isOpen: true,
       title: "Clear Entire Network?",
-      message: "Are you sure you want to remove ALL dimensions, nodes, and edges? This action cannot be undone, though you can always re-import the default network later.",
+      message: "Are you sure you want to remove ALL domains, nodes, and edges? This action cannot be undone, though you can always re-import the default network later.",
       confirmText: "Clear All",
       cancelText: "Cancel",
       type: "danger",
@@ -109,7 +109,7 @@ export default function ConfigPage() {
         setLoading(true);
         try {
           await dataService.clearNetwork();
-          showFeedback("All network dimensions, nodes, and edges have been removed.", "success");
+          showFeedback("All network domains, nodes, and edges have been removed.", "success");
         } catch (err: any) {
           console.error(err);
           showFeedback(`Failed to clear network: ${err?.message || err}`, "error");
@@ -124,7 +124,7 @@ export default function ConfigPage() {
     setModal({
       isOpen: true,
       title: "Import Default Network?",
-      message: "Are you sure you want to seed the default network? This will replace your current dimensions, nodes, and edges with default default structures!",
+      message: "Are you sure you want to seed the default network? This will replace your current domains, nodes, and edges with default default structures!",
       confirmText: "Import",
       cancelText: "Cancel",
       type: "info",
@@ -145,30 +145,30 @@ export default function ConfigPage() {
   };
 
   // ==========================================
-  // DIMENSION CRUD
+  // DOMAIN CRUD
   // ==========================================
-  const handleSaveDimension = async (e: React.FormEvent) => {
+  const handleSaveDomain = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dimForm.id.trim() || !dimForm.name.trim()) return;
+    if (!domainForm.id.trim() || !domainForm.name.trim()) return;
 
     try {
-      const newDim: Dimension = { id: dimForm.id.trim(), name: dimForm.name.trim() };
-      await dataService.saveDimension(newDim);
-      setDimForm({ id: "", name: "" });
-      setEditingDimId(null);
-      showFeedback(`Dimension ${newDim.id} saved successfully!`, "success");
+      const newDomain: Domain = { id: domainForm.id.trim(), name: domainForm.name.trim() };
+      await dataService.saveDomain(newDomain);
+      setDomainForm({ id: "", name: "" });
+      setEditingDomainId(null);
+      showFeedback(`Domain ${newDomain.id} saved successfully!`, "success");
     } catch (err: any) {
-      showFeedback(`Failed to save dimension: ${err.message}`, "error");
+      showFeedback(`Failed to save domain: ${err.message}`, "error");
     }
   };
 
-  const handleDeleteDimension = async (id: string) => {
-    const assignedNodes = nodes.filter((n) => n.dimension_id === id);
+  const handleDeleteDomain = async (id: string) => {
+    const assignedNodes = nodes.filter((n) => n.domain_id === id);
     if (assignedNodes.length > 0) {
       setModal({
         isOpen: true,
-        title: "Cannot Delete Dimension",
-        message: `Cannot delete dimension. There are ${assignedNodes.length} indicators still assigned to it (e.g., ${assignedNodes[0].abbr}). Reassign them first!`,
+        title: "Cannot Delete Domain",
+        message: `Cannot delete domain. There are ${assignedNodes.length} indicators still assigned to it (e.g., ${assignedNodes[0].abbr}). Reassign them first!`,
         confirmText: "OK",
         type: "danger",
         showCancel: false,
@@ -179,18 +179,18 @@ export default function ConfigPage() {
 
     setModal({
       isOpen: true,
-      title: "Delete Dimension?",
-      message: "Are you sure you want to delete this dimension?",
+      title: "Delete Domain?",
+      message: "Are you sure you want to delete this domain?",
       confirmText: "Delete",
       cancelText: "Cancel",
       type: "danger",
       onConfirm: async () => {
         closeModal();
         try {
-          await dataService.deleteDimension(id);
-          showFeedback("Dimension deleted successfully!", "success");
+          await dataService.deleteDomain(id);
+          showFeedback("Domain deleted successfully!", "success");
         } catch (err: any) {
-          showFeedback(`Failed to delete dimension: ${err.message}`, "error");
+          showFeedback(`Failed to delete domain: ${err.message}`, "error");
         }
       }
     });
@@ -202,7 +202,7 @@ export default function ConfigPage() {
   const handleSaveNode = async (e: React.FormEvent) => {
     e.preventDefault();
     const abbr = nodeForm.abbr.trim().toUpperCase();
-    if (!abbr || !nodeForm.full_name.trim() || !nodeForm.dimension_id) {
+    if (!abbr || !nodeForm.full_name.trim() || !nodeForm.domain_id) {
       showFeedback("Please fill in all indicator fields!", "error");
       return;
     }
@@ -212,7 +212,7 @@ export default function ConfigPage() {
         id: abbr,
         abbr: abbr,
         full_name: nodeForm.full_name.trim(),
-        dimension_id: nodeForm.dimension_id,
+        domain_id: nodeForm.domain_id,
         theta: Number(nodeForm.theta),
         recovery_rate: Number(nodeForm.recovery_rate)
       };
@@ -222,7 +222,7 @@ export default function ConfigPage() {
         id: "",
         abbr: "",
         full_name: "",
-        dimension_id: dimensions[0]?.id || "1",
+        domain_id: domains[0]?.id || "1",
         theta: 0.2,
         recovery_rate: 0.01
       });
@@ -313,8 +313,8 @@ export default function ConfigPage() {
   const filteredNodes = nodes.filter((node) => {
     const matchesSearch = node.abbr.toLowerCase().includes(nodeSearch.toLowerCase()) || 
                           node.full_name.toLowerCase().includes(nodeSearch.toLowerCase());
-    const matchesDim = nodeDimFilter === "all" || node.dimension_id === nodeDimFilter;
-    return matchesSearch && matchesDim;
+    const matchesDomain = nodeDomainFilter === "all" || node.domain_id === nodeDomainFilter;
+    return matchesSearch && matchesDomain;
   });
 
   const filteredEdges = edges.filter((edge) => {
@@ -347,7 +347,7 @@ export default function ConfigPage() {
             )}
           </h1>
           <p className="text-slate-500 text-xs">
-            Manage your city resilience model's indicators, dimensions, and structural dependencies.
+            Manage your city resilience model's indicators, domains, and structural dependencies.
           </p>
         </div>
 <div className="flex items-center gap-3">
@@ -411,20 +411,20 @@ export default function ConfigPage() {
             </span>
           </button>
           <button
-            onClick={() => setActiveTab("dimensions")}
+            onClick={() => setActiveTab("domains")}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
-              activeTab === "dimensions" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
+              activeTab === "domains" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
             }`}
           >
-            <span>Dimensions</span>
+            <span>Domains</span>
             <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
-              {dimensions.length}
+              {domains.length}
             </span>
           </button>
 
           <div className="pt-4 border-t border-slate-100 px-2 text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
             <Info size={12} className="shrink-0 mt-0.5" />
-            <span>The network model requires at least 1 indicator in a dimension to visualize it correctly. Use <strong>Import Default Network</strong> to reset or restore configuration.</span>
+            <span>The network model requires at least 1 indicator in a domain to visualize it correctly. Use <strong>Import Default Network</strong> to reset or restore configuration.</span>
           </div>
         </div>
 
@@ -439,31 +439,31 @@ export default function ConfigPage() {
             </div>
           )}
 
-          {!loading && activeTab === "dimensions" && (
-            <div className="space-y-6" id="dimensions-tab">
-              {/* Form to create/edit dimension */}
+          {!loading && activeTab === "domains" && (
+            <div className="space-y-6" id="domains-tab">
+              {/* Form to create/edit domain */}
               <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 font-sans">
-                  {editingDimId ? "Edit Dimension" : "Create New Dimension"}
+                  {editingDomainId ? "Edit Domain" : "Create New Domain"}
                 </h3>
-                <form onSubmit={handleSaveDimension} className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
+                <form onSubmit={handleSaveDomain} className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
                   <div className="sm:col-span-3 space-y-1">
-                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Dimension ID/Number</label>
+                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Domain ID/Number</label>
                     <input
                       type="text"
-                      disabled={!!editingDimId}
-                      value={dimForm.id}
-                      onChange={(e) => setDimForm({ ...dimForm, id: e.target.value })}
+                      disabled={!!editingDomainId}
+                      value={domainForm.id}
+                      onChange={(e) => setDomainForm({ ...domainForm, id: e.target.value })}
                       placeholder="e.g. 1"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
                     />
                   </div>
                   <div className="sm:col-span-6 space-y-1">
-                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Dimension Name</label>
+                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Domain Name</label>
                     <input
                       type="text"
-                      value={dimForm.name}
-                      onChange={(e) => setDimForm({ ...dimForm, name: e.target.value })}
+                      value={domainForm.name}
+                      onChange={(e) => setDomainForm({ ...domainForm, name: e.target.value })}
                       placeholder="e.g. Critical Infrastructure"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
                     />
@@ -473,14 +473,14 @@ export default function ConfigPage() {
                       type="submit"
                       className="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-lg transition-colors cursor-pointer"
                     >
-                      {editingDimId ? "Save" : "Add Dimension"}
+                      {editingDomainId ? "Save" : "Add Domain"}
                     </button>
-                    {editingDimId && (
+                    {editingDomainId && (
                       <button
                         type="button"
                         onClick={() => {
-                          setEditingDimId(null);
-                          setDimForm({ id: "", name: "" });
+                          setEditingDomainId(null);
+                          setDomainForm({ id: "", name: "" });
                         }}
                         className="px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs rounded-lg transition-colors"
                       >
@@ -491,16 +491,16 @@ export default function ConfigPage() {
                 </form>
               </div>
 
-              {/* Dimensions list */}
+              {/* Domains list */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Dimension Registry</h3>
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Domain Registry</h3>
                 </div>
                 <div className="divide-y divide-slate-100 text-xs">
-                  {dimensions.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400">No dimensions registered. Click "Import Default Network" above to load standard schema.</div>
+                  {domains.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400">No domains registered. Click "Import Default Network" above to load standard schema.</div>
                   ) : (
-                    dimensions.map((dim) => (
+                    domains.map((dim) => (
                       <div key={dim.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
                         <div className="flex items-center gap-3">
                           <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-slate-700 font-mono font-bold rounded-lg border border-slate-200 text-[10px]">
@@ -511,15 +511,15 @@ export default function ConfigPage() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => {
-                              setEditingDimId(dim.id);
-                              setDimForm({ id: dim.id, name: dim.name });
+                              setEditingDomainId(dim.id);
+                              setDomainForm({ id: dim.id, name: dim.name });
                             }}
                             className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-md transition-colors"
                           >
                             <Edit3 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDeleteDimension(dim.id)}
+                            onClick={() => handleDeleteDomain(dim.id)}
                             className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
                           >
                             <Trash2 size={13} />
@@ -565,15 +565,15 @@ export default function ConfigPage() {
                       />
                     </div>
                     <div className="md:col-span-5 space-y-1">
-                      <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Dimension Assignment</label>
+                      <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Domain Assignment</label>
                       <select
-                        value={nodeForm.dimension_id}
-                        onChange={(e) => setNodeForm({ ...nodeForm, dimension_id: e.target.value })}
+                        value={nodeForm.domain_id}
+                        onChange={(e) => setNodeForm({ ...nodeForm, domain_id: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
                       >
-                        {dimensions.map((d) => (
+                        {domains.map((d) => (
                           <option key={d.id} value={d.id}>
-                            Dimension {d.id} — {d.name}
+                            Domain {d.id} — {d.name}
                           </option>
                         ))}
                       </select>
@@ -626,7 +626,7 @@ export default function ConfigPage() {
                             id: "",
                             abbr: "",
                             full_name: "",
-                            dimension_id: dimensions[0]?.id || "1",
+                            domain_id: domains[0]?.id || "1",
                             theta: 0.2,
                             recovery_rate: 0.01
                           });
@@ -664,12 +664,12 @@ export default function ConfigPage() {
                       />
                     </div>
                     <select
-                      value={nodeDimFilter}
-                      onChange={(e) => setNodeDimFilter(e.target.value)}
+                      value={nodeDomainFilter}
+                      onChange={(e) => setNodeDomainFilter(e.target.value)}
                       className="py-1.5 px-3 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
                     >
-                      <option value="all">All Dimensions</option>
-                      {dimensions.map((d) => (
+                      <option value="all">All Domains</option>
+                      {domains.map((d) => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
@@ -682,7 +682,7 @@ export default function ConfigPage() {
                       <tr className="bg-slate-50 text-slate-500 border-b border-slate-100 font-mono text-[10px] uppercase">
                         <th className="p-3 font-semibold">Abbr</th>
                         <th className="p-3 font-semibold">Full Name</th>
-                        <th className="p-3 font-semibold">Dimension</th>
+                        <th className="p-3 font-semibold">Domain</th>
                         <th className="p-3 font-semibold text-center">Threshold (θ)</th>
                         <th className="p-3 font-semibold text-center">Recovery (r)</th>
                         <th className="p-3 font-semibold text-right">Actions</th>
@@ -695,14 +695,14 @@ export default function ConfigPage() {
                         </tr>
                       ) : (
                         filteredNodes.map((node) => {
-                          const dName = dimensions.find((d) => d.id === node.dimension_id)?.name || `Dim ${node.dimension_id}`;
+                          const dName = domains.find((d) => d.id === node.domain_id)?.name || `Domain ${node.domain_id}`;
                           return (
                             <tr key={node.abbr} className="hover:bg-slate-50/30 transition-colors">
                               <td className="p-3 font-mono font-bold text-slate-900">{node.abbr}</td>
                               <td className="p-3 font-medium font-sans">{node.full_name}</td>
                               <td className="p-3">
                                 <span className="bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded-full font-sans">
-                                  {node.dimension_id} — {dName}
+                                  {node.domain_id} — {dName}
                                 </span>
                               </td>
                               <td className="p-3 text-center font-mono">{node.theta ?? 0.2}</td>
@@ -716,7 +716,7 @@ export default function ConfigPage() {
                                         id: node.abbr,
                                         abbr: node.abbr,
                                         full_name: node.full_name,
-                                        dimension_id: node.dimension_id,
+                                        domain_id: node.domain_id,
                                         theta: node.theta ?? 0.2,
                                         recovery_rate: node.recovery_rate ?? 0.01
                                       });
@@ -835,7 +835,7 @@ export default function ConfigPage() {
                         filteredEdges.map((edge) => {
                           const sNode = nodes.find(n => n.abbr === edge.source);
                           const tNode = nodes.find(n => n.abbr === edge.target);
-                          const isIntraDomain = sNode && tNode && sNode.dimension_id === tNode.dimension_id;
+                          const isIntraDomain = sNode && tNode && sNode.domain_id === tNode.domain_id;
                           return (
                             <tr key={edge.id} className="hover:bg-slate-50/30 transition-colors">
                               <td className="p-3">
