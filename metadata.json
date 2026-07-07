@@ -1,6 +1,8 @@
 {
-  "name": "URSA - Urban Resilience Simulator",
-  "description": "An advanced graph propagation simulation platform modeling urban system cascading risk over directed networks.",
+  "name": "Network Simulator",
+  "description": "An advanced graph propagation simulation platform modeling cascading risk over directed networks.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

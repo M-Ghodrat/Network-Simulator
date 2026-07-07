@@ -348,7 +348,7 @@ export default function SimulatorPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `ursa_simulation_results_T${T}.csv`);
+    link.setAttribute("download", `network_simulation_results_T${T}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -359,7 +359,7 @@ export default function SimulatorPage() {
     const base64Data = simResult.plots[selectedWave];
     const link = document.createElement("a");
     link.setAttribute("href", base64Data);
-    link.setAttribute("download", `ursa_network_wave_${selectedWave}.png`);
+    link.setAttribute("download", `cascade_network_wave_${selectedWave}.png`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -691,7 +691,7 @@ export default function SimulatorPage() {
           {simulating && (
             <div className="absolute inset-0 bg-slate-100/60 backdrop-blur-xs flex flex-col items-center justify-center gap-3 rounded-xl z-20">
               <RefreshCw size={36} className="animate-spin text-indigo-600" />
-              <span className="text-xs text-slate-600 font-semibold">Running URSA realistic stress propagation...</span>
+              <span className="text-xs text-slate-600 font-semibold">Running realistic stress propagation...</span>
             </div>
           )}
 

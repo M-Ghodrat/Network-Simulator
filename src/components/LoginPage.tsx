@@ -144,7 +144,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             </div>
             <span className="font-mono text-xs font-bold uppercase tracking-wider text-slate-400">Project Portal</span>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight font-sans relative z-10">URSA Network Simulator</h2>
+          <h2 className="text-2xl font-bold tracking-tight font-sans relative z-10">Network Simulator</h2>
           <p className="text-slate-400 text-xs leading-relaxed relative z-10">
             Urban Resilience and Sustainability Alliance. Model cascading risks, configure indicator nodes, and plan stress interventions.
           </p>
@@ -199,7 +199,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
                   <input
                     type="email"
                     required
-                    placeholder="e.g. planner@ursa.org"
+                    placeholder="e.g. planner@network.org"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
@@ -285,7 +285,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => handleBypassLogin("user1@ursa.org", "user1")}
+                onClick={() => handleBypassLogin("user1@network.org", "user1")}
                 disabled={loading}
                 className="py-2.5 px-1 border border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/40 text-indigo-700 hover:bg-indigo-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
               >
@@ -295,7 +295,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
               
               <button
                 type="button"
-                onClick={() => handleBypassLogin("user2@ursa.org", "user2")}
+                onClick={() => handleBypassLogin("user2@network.org", "user2")}
                 disabled={loading}
                 className="py-2.5 px-1 border border-dashed border-emerald-200 hover:border-emerald-400 bg-emerald-50/40 text-emerald-700 hover:bg-emerald-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
               >
@@ -305,7 +305,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
 
               <button
                 type="button"
-                onClick={() => handleBypassLogin("user3@ursa.org", "user3")}
+                onClick={() => handleBypassLogin("user3@network.org", "user3")}
                 disabled={loading}
                 className="py-2.5 px-1 border border-dashed border-purple-200 hover:border-purple-400 bg-purple-50/40 text-purple-700 hover:bg-purple-50 text-[11px] font-bold rounded-xl transition-colors cursor-pointer flex flex-col items-center justify-center gap-0.5"
               >
@@ -317,21 +317,21 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             <div className="grid grid-cols-2 gap-2 mt-1">
               <button
                 type="button"
-                onClick={() => handleBypassLogin("admin@ursa.org", "adminpass123")}
+                onClick={() => handleBypassLogin("admin@network.org", "adminpass123")}
                 disabled={loading}
                 className="py-1.5 px-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200 rounded-lg transition-colors cursor-pointer flex flex-col items-center justify-center"
               >
                 <span className="font-bold">Bypass as Admin</span>
-                <span className="text-[8px] font-mono text-slate-400">admin@ursa.org</span>
+                <span className="text-[8px] font-mono text-slate-400">admin@network.org</span>
               </button>
               <button
                 type="button"
-                onClick={() => handleBypassLogin("demo@ursa.org", "demopass123")}
+                onClick={() => handleBypassLogin("demo@network.org", "demopass123")}
                 disabled={loading}
                 className="py-1.5 px-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200 rounded-lg transition-colors cursor-pointer flex flex-col items-center justify-center"
               >
                 <span className="font-bold">Bypass as Analyst</span>
-                <span className="text-[8px] font-mono text-slate-400">demo@ursa.org</span>
+                <span className="text-[8px] font-mono text-slate-400">demo@network.org</span>
               </button>
             </div>
           </div>

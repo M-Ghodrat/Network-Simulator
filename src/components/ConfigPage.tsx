@@ -124,7 +124,7 @@ export default function ConfigPage() {
     setModal({
       isOpen: true,
       title: "Import Default Network?",
-      message: "Are you sure you want to seed the default network? This will replace your current dimensions, nodes, and edges with default URSA structures!",
+      message: "Are you sure you want to seed the default network? This will replace your current dimensions, nodes, and edges with default default structures!",
       confirmText: "Import",
       cancelText: "Cancel",
       type: "info",
@@ -424,7 +424,7 @@ export default function ConfigPage() {
 
           <div className="pt-4 border-t border-slate-100 px-2 text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
             <Info size={12} className="shrink-0 mt-0.5" />
-            <span>The URSA model requires at least 1 indicator in a dimension to visualize it correctly. Use <strong>Import Default Network</strong> to reset or restore configuration.</span>
+            <span>The network model requires at least 1 indicator in a dimension to visualize it correctly. Use <strong>Import Default Network</strong> to reset or restore configuration.</span>
           </div>
         </div>
 

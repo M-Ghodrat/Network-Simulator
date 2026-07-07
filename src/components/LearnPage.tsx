@@ -158,11 +158,11 @@ export default function LearnPage() {
           <ul className="space-y-2 text-sm text-slate-600 pl-1">
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold mt-0.5">•</span>
-              <span><strong>Nodes:</strong> Individual entities or actors within the system. In URSA, nodes represent 40 core resilience indicators (e.g., Water Supply, Energy, Public Finance).</span>
+              <span><strong>Nodes:</strong> Individual entities, components, variables, or actors within a system. In the Network Simulator, these represent the distinct functional units of your network.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold mt-0.5">•</span>
-              <span><strong>Directed Edges:</strong> Connections representing causal influence or dependencies from one node to another. An edge from <em>Energy (EN)</em> to <em>Water (WR)</em> indicates that a power failure directly degrades water pumping capacity.</span>
+              <span><strong>Directed Edges:</strong> Connections representing directed causal influence, flows, or functional dependencies from one node to another. An edge from <em>Node A</em> to <em>Node B</em> indicates that a failure or state change in Node A directly affects or propagates to Node B.</span>
             </li>
           </ul>
         </div>
@@ -173,57 +173,22 @@ export default function LearnPage() {
               <Shield size={20} />
             </div>
             <h2 className="text-lg font-bold text-slate-900 font-sans">
-              Urban Resilience & Cascades
+              System Resilience & Cascades
             </h2>
           </div>
           <p className="text-slate-600 text-sm leading-relaxed">
-            <strong>Urban Resilience</strong> is the capacity of cities to survive, adapt, and grow no matter what kinds of chronic stresses and acute shocks they experience.
+            <strong>System Resilience</strong> is the capacity of a complex network to withstand, adapt to, and recover from external shocks, disruptions, or localized component failures.
           </p>
           <ul className="space-y-2 text-sm text-slate-600 pl-1">
             <li className="flex items-start gap-2">
               <span className="text-emerald-500 font-bold mt-0.5">•</span>
-              <span><strong>Acute Shocks:</strong> Sudden, sharp events that threaten a city (e.g., floods, cyberattacks, financial collapses).</span>
+              <span><strong>External Shocks:</strong> Sudden, sharp disruptions that negatively impact the stability or health of one or more key nodes in the network.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-emerald-500 font-bold mt-0.5">•</span>
-              <span><strong>Cascading Failures:</strong> A process where a shock to a single node triggers a chain reaction, progressively disabling downstream connected systems. The URSA Simulator models how these cascades propagate through adaptive edge weights.</span>
+              <span><strong>Cascading Failures:</strong> A process where a localized shock to a single node triggers a chain reaction, progressively degrading downstream connected systems. The Network Simulator models how these cascades propagate through adaptive edge weights over time.</span>
             </li>
           </ul>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs space-y-6" id="dimensions-section">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg">
-            <Layers size={20} />
-          </div>
-          <h2 className="text-lg font-bold text-slate-900 font-sans">
-            The 7 Core Dimensions of URSA
-          </h2>
-        </div>
-        <p className="text-slate-600 text-sm leading-relaxed">
-          The URSA framework groups 40 core resilience indicators into 7 main dimensions of urban sustainability. Edges can connect indicators within the same dimension (intra-domain) or across different dimensions (inter-domain).
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="dimensions-grid">
-          {[
-            { id: 1, name: "Critical Infrastructure", desc: "Energy, Water, Transport, Built & Digital infrastructure services." },
-            { id: 2, name: "Economics", desc: "Financial robustness, Diverse livelihoods, Business environments, Assets." },
-            { id: 3, name: "Environment", desc: "Air quality, Decarbonization, Flood control, Ecology, Heat stress mitigation." },
-            { id: 4, name: "Health & Well-being", desc: "Quality healthcare access, Public health systems, Emergency care services." },
-            { id: 5, name: "Institutional", desc: "Education, Inclusivity, Rule of Law, Cross-sector collaboration & Knowledge." },
-            { id: 6, name: "Leadership & Strategy", desc: "Governance, Integrated planning, and Disaster Management systems." },
-            { id: 7, name: "Social & Demographic", desc: "Social cohesion, Comprehensive security, Community prepared engagement." }
-          ].map((dim) => (
-            <div key={dim.id} className="p-4 bg-slate-50 border border-slate-200/60 rounded-xl space-y-1" id={`dim-card-${dim.id}`}>
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 flex items-center justify-center bg-indigo-100 text-indigo-700 text-[10px] font-mono font-bold rounded-full">
-                  {dim.id}
-                </span>
-                <h4 className="text-sm font-semibold text-slate-900 truncate">{dim.name}</h4>
-              </div>
-              <p className="text-slate-500 text-[11px] leading-relaxed">{dim.desc}</p>
-            </div>
-          ))}
         </div>
       </div>
     </div>
@@ -238,10 +203,10 @@ export default function LearnPage() {
             Module 1: Foundations
           </span>
           <h1 className="text-3xl font-bold tracking-tight font-sans">
-            Urban Resilience Network Science
+            Network Simulator Educational Suite
           </h1>
           <p className="text-slate-300 text-sm leading-relaxed">
-            Welcome to the URSA educational suite. Explore general network theory concepts, or dive into specific topics like Centrality metrics using our video lessons below.
+            Welcome to the Network Simulator educational suite. Explore general network theory concepts, or dive into specific topics like Centrality metrics using our video lessons below.
           </p>
         </div>
         <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-12 translate-y-12 select-none" id="learn-bg-icon">

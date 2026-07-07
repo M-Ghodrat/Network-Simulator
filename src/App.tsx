@@ -60,7 +60,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3" id="app-loading-screen">
         <RefreshCw size={36} className="animate-spin text-slate-400" />
         <span className="text-xs text-slate-500 font-mono font-semibold uppercase tracking-wider">
-          Initializing URSA Workspace...
+          Initializing Network Simulator Workspace...
         </span>
       </div>
     );
@@ -89,7 +89,7 @@ export default function App() {
                 <Network size={18} />
               </div>
               <div>
-                <span className="font-bold text-slate-950 text-sm tracking-tight font-sans">URSA</span>
+                <span className="font-bold text-slate-950 text-sm tracking-tight font-sans">Network Simulator</span>
                 <span className="text-[10px] text-slate-400 font-mono block -mt-1 font-bold">RSPM SIMULATOR</span>
               </div>
             </div>
@@ -154,7 +154,7 @@ export default function App() {
               <button
                 onClick={handleLogout}
                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
-                title="Log out of URSA"
+                title="Log out of Network Simulator"
                 id="logout-btn"
               >
                 <LogOut size={15} />
@@ -175,7 +175,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3 text-center" id="app-footer">
         <div className="max-w-7xl mx-auto px-4 text-[10px] font-mono text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>URSA — Urban Resilience & Sustainability Alliance v1.2.0</span>
+          <span>Network Simulator v1.2.0</span>
           <span>Security Context: Firestore Encrypted Core DB &bull; Active Node Session</span>
         </div>
       </footer>
