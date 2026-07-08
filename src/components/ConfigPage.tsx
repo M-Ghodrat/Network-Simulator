@@ -3,6 +3,7 @@ import { Domain, NodeIndicator, Edge } from "../types";
 import { dataService } from "../dataService";
 import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
+import { auth } from "../firebase";
 
 export default function ConfigPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -10,6 +11,37 @@ export default function ConfigPage() {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLocal, setIsLocal] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  useEffect(() => {
+    const userObj = auth.currentUser;
+    if (userObj) {
+      setCurrentUser(userObj);
+    } else {
+      const localUser = localStorage.getItem("ursa_local_user");
+      if (localUser) {
+        try {
+          setCurrentUser(JSON.parse(localUser));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+
+    const unsubAuth = auth.onAuthStateChanged((u) => {
+      if (u) {
+        setCurrentUser(u);
+      } else {
+        const localUser = localStorage.getItem("ursa_local_user");
+        if (localUser) {
+          try {
+            setCurrentUser(JSON.parse(localUser));
+          } catch (e) {}
+        }
+      }
+    });
+    return () => unsubAuth();
+  }, []);
 
   // Success / error feedback
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
@@ -327,13 +359,25 @@ export default function ConfigPage() {
            tName.toLowerCase().includes(query);
   });
 
+  const emailPrefix = currentUser?.email ? currentUser.email.split("@")[0].toLowerCase() : "";
+  let modeSuffix = "";
+  if (emailPrefix === "user1") {
+    modeSuffix = " (Mode A)";
+  } else if (emailPrefix === "user2") {
+    modeSuffix = " (Mode B)";
+  } else if (emailPrefix === "user3") {
+    modeSuffix = " (Mode C)";
+  } else if (emailPrefix === "admin") {
+    modeSuffix = " (URSA)";
+  }
+
   return (
     <div className="space-y-6 py-2 animate-fade-in" id="config-page">
       {/* Top action header */}
       <div className="bg-white p-6 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs" id="config-header">
         <div className="space-y-1">
           <h1 className="text-xl font-bold text-slate-950 font-sans flex flex-wrap items-center gap-2">
-            Network Configuration
+            Network Configuration{modeSuffix}
             {isLocal ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-semibold font-mono rounded-full">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>

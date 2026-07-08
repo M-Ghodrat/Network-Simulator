@@ -60,7 +60,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3" id="app-loading-screen">
         <RefreshCw size={36} className="animate-spin text-slate-400" />
         <span className="text-xs text-slate-500 font-mono font-semibold uppercase tracking-wider">
-          Initializing Network Simulator Workspace...
+          Initializing URSA Workspace...
         </span>
       </div>
     );
@@ -73,6 +73,27 @@ export default function App() {
         <LoginPage onLocalLogin={setUser} />
       </div>
     );
+  }
+
+  const emailPrefix = user?.email ? user.email.split("@")[0].toLowerCase() : "";
+  let userDisplayName = "User";
+  let modeDisplayName = "Mode A";
+
+  if (emailPrefix === "user1") {
+    userDisplayName = "User 1";
+    modeDisplayName = "Mode A";
+  } else if (emailPrefix === "user2") {
+    userDisplayName = "User 2";
+    modeDisplayName = "Mode B";
+  } else if (emailPrefix === "user3") {
+    userDisplayName = "User 3";
+    modeDisplayName = "Mode C";
+  } else if (emailPrefix === "admin") {
+    userDisplayName = "Admin";
+    modeDisplayName = "Mode Admin";
+  } else if (emailPrefix) {
+    userDisplayName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+    modeDisplayName = "Mode Default";
   }
 
   return (
@@ -89,8 +110,8 @@ export default function App() {
                 <Network size={18} />
               </div>
               <div>
-                <span className="font-bold text-slate-950 text-sm tracking-tight font-sans">Network Simulator</span>
-                <span className="text-[10px] text-slate-400 font-mono block -mt-1 font-bold">RSPM SIMULATOR</span>
+                <span className="font-bold text-slate-950 text-sm tracking-tight font-sans">URSA</span>
+                <span className="text-[10px] text-slate-400 font-mono block -mt-1 font-bold">Urban Intelligence Studio</span>
               </div>
             </div>
 
@@ -139,10 +160,12 @@ export default function App() {
             {/* User Account Menu */}
             <div className="flex items-center gap-2 sm:gap-3" id="app-user-menu">
               <div className="hidden md:flex flex-col items-end text-right">
-                <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider font-bold">
-                  {user.email?.toLowerCase().includes("admin") ? "Resilience Admin" : "Resilience Analyst"}
+                <span className="text-[11px] font-semibold text-slate-800 tracking-tight font-sans">
+                  {userDisplayName}
                 </span>
-                <span className="text-[11px] font-semibold text-slate-700 max-w-[150px] truncate">{user.email}</span>
+                <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider font-bold">
+                  {modeDisplayName}
+                </span>
               </div>
               
               <div className="p-1 bg-slate-100 rounded-full text-slate-500 md:hidden">
@@ -154,7 +177,7 @@ export default function App() {
               <button
                 onClick={handleLogout}
                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
-                title="Log out of Network Simulator"
+                title="Log out of URSA"
                 id="logout-btn"
               >
                 <LogOut size={15} />
@@ -175,7 +198,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3 text-center" id="app-footer">
         <div className="max-w-7xl mx-auto px-4 text-[10px] font-mono text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Network Simulator v1.2.0</span>
+          <span>URSA - Urban Intelligence Studio v1.2.0</span>
           <span>Security Context: Firestore Encrypted Core DB &bull; Active Node Session</span>
         </div>
       </footer>

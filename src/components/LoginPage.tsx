@@ -101,7 +101,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             </div>
             <span className="font-mono text-xs font-bold uppercase tracking-wider text-slate-400">Project Portal</span>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight font-sans relative z-10">Network Simulator</h2>
+          <h2 className="text-2xl font-bold tracking-tight font-sans relative z-10">URSA - Urban Intelligence Studio</h2>
           <p className="text-slate-400 text-xs leading-relaxed relative z-10">
             Urban Resilience and Sustainability Alliance. Model cascading risks, configure indicator nodes, and plan stress interventions.
           </p>
