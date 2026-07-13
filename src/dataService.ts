@@ -11,7 +11,7 @@ const DEFAULT_PARAMS: SimulatorParams = {
   theta: 0.2,
   gamma: 1.5,
   epsilon: 0.001,
-  rv: 0.01,
+  rv: 0.05,
   shocks: [
     { node: "PF", intensity: 0.4 },
     { node: "BE", intensity: 0.4 }

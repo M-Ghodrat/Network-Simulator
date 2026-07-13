@@ -51,7 +51,7 @@ export default function SimulatorPage() {
   const [theta, setTheta] = useState(0.2);
   const [gamma, setGamma] = useState(1.5);
   const [epsilon, setEpsilon] = useState(0.001);
-  const [rv, setRv] = useState(0.01);
+  const [rv, setRv] = useState(0.05);
 
   // Shocks list
   const [shocks, setShocks] = useState<Shock[]>([]);
@@ -111,7 +111,7 @@ export default function SimulatorPage() {
         setTheta(p.theta ?? 0.2);
         setGamma(p.gamma ?? 1.5);
         setEpsilon(p.epsilon ?? 0.001);
-        setRv(p.rv ?? 0.01);
+        setRv(p.rv ?? 0.05);
         if (p.shocks) setShocks(p.shocks);
         if (p.interventions) setInterventions(p.interventions);
       }
@@ -479,8 +479,8 @@ export default function SimulatorPage() {
               </div>
               <input
                 type="range"
-                min="0.1"
-                max="0.3"
+                min="0.05"
+                max="0.95"
                 step="0.01"
                 value={theta}
                 onChange={(e) => setTheta(Number(e.target.value))}
@@ -514,7 +514,7 @@ export default function SimulatorPage() {
               <input
                 type="range"
                 min="0.00"
-                max="0.10"
+                max="1.00"
                 step="0.005"
                 value={rv}
                 onChange={(e) => setRv(Number(e.target.value))}

@@ -81,7 +81,7 @@ export default function ConfigPage() {
     full_name: "",
     domain_id: "1",
     theta: 0.2,
-    recovery_rate: 0.01
+    recovery_rate: 0.05
   });
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
@@ -256,7 +256,7 @@ export default function ConfigPage() {
         full_name: "",
         domain_id: domains[0]?.id || "1",
         theta: 0.2,
-        recovery_rate: 0.01
+        recovery_rate: 0.05
       });
       setEditingNodeId(null);
       showFeedback(`Indicator ${newNode.abbr} saved successfully!`, "success");
@@ -632,8 +632,8 @@ export default function ConfigPage() {
                       </div>
                       <input
                         type="range"
-                        min="0.1"
-                        max="0.3"
+                        min="0.05"
+                        max="0.95"
                         step="0.01"
                         value={nodeForm.theta}
                         onChange={(e) => setNodeForm({ ...nodeForm, theta: Number(e.target.value) })}
@@ -650,7 +650,7 @@ export default function ConfigPage() {
                       <input
                         type="range"
                         min="0.00"
-                        max="0.10"
+                        max="1.00"
                         step="0.005"
                         value={nodeForm.recovery_rate}
                         onChange={(e) => setNodeForm({ ...nodeForm, recovery_rate: Number(e.target.value) })}
@@ -672,7 +672,7 @@ export default function ConfigPage() {
                             full_name: "",
                             domain_id: domains[0]?.id || "1",
                             theta: 0.2,
-                            recovery_rate: 0.01
+                            recovery_rate: 0.05
                           });
                         }}
                         className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs rounded-lg transition-colors"
@@ -750,7 +750,7 @@ export default function ConfigPage() {
                                 </span>
                               </td>
                               <td className="p-3 text-center font-mono">{node.theta ?? 0.2}</td>
-                              <td className="p-3 text-center font-mono">{node.recovery_rate ?? 0.01}</td>
+                              <td className="p-3 text-center font-mono">{node.recovery_rate ?? 0.05}</td>
                               <td className="p-3 text-right">
                                 <div className="flex gap-2 justify-end">
                                   <button
@@ -762,7 +762,7 @@ export default function ConfigPage() {
                                         full_name: node.full_name,
                                         domain_id: node.domain_id,
                                         theta: node.theta ?? 0.2,
-                                        recovery_rate: node.recovery_rate ?? 0.01
+                                        recovery_rate: node.recovery_rate ?? 0.05
                                       });
                                     }}
                                     className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-md transition-colors"

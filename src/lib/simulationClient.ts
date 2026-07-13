@@ -320,7 +320,7 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
   const gamma = params.gamma || 1.5;
   const epsilon = params.epsilon || 0.001;
   const default_theta = params.default_theta || 0.2;
-  const default_recovery_rate = params.default_recovery_rate || 0.01;
+  const default_recovery_rate = params.default_recovery_rate || 0.05;
   const interventions_raw = params.interventions || [];
 
   const nodes_list = nodes.map(n => n.abbr);
