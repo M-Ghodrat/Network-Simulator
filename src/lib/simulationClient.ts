@@ -152,20 +152,42 @@ function generateSvgPlot(
   domains_list: string[],
   nodes_domain: Record<string, string>
 ) {
-  const domainColors: Record<string, string> = {
-    "1": "#4169E1",
-    "2": "#2E8B57",
-    "3": "#228B22",
-    "4": "#FF69B4",
-    "5": "#8A2BE2",
-    "6": "#FF8C00",
-    "7": "#D2691E"
+  const colorPalette = [
+    "#3b82f6", // 1. Indigo Blue
+    "#10b981", // 2. Emerald Green
+    "#f43f5e", // 3. Rose/Pink
+    "#eab308", // 4. Gold/Yellow
+    "#8b5cf6", // 5. Purple
+    "#f97316", // 6. Orange
+    "#06b6d4", // 7. Cyan
+    "#ef4444", // 8. Crimson Red
+    "#14b8a6", // 9. Teal
+    "#d946ef", // 10. Magenta
+    "#84cc16", // 11. Lime Green
+    "#6366f1", // 12. Indigo
+    "#ec4899", // 13. Pink
+    "#f59e0b", // 14. Amber
+    "#a855f7", // 15. Violet
+    "#0284c7", // 16. Sky Blue
+    "#b91c1c", // 17. Dark Red
+    "#0f766e", // 18. Dark Teal
+    "#15803d", // 19. Forest Green
+    "#7c2d12"  // 20. Chocolate Brown
+  ];
+
+  const getDomainColor = (domainId: string, idx: number) => {
+    const parsed = parseInt(domainId, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= colorPalette.length) {
+      return colorPalette[parsed - 1];
+    }
+    return colorPalette[idx % colorPalette.length];
   };
 
   const scale = 14.0;
   const svg_elements: string[] = [];
 
-  svg_elements.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-210 -200 420 440" width="100%" height="100%">');
+  // Extended height viewBox to accommodate the beautiful inline legend at the bottom corner below colorbar
+  svg_elements.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-210 -200 420 620" width="100%" height="100%">');
   
   svg_elements.push(`  <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -181,54 +203,21 @@ function generateSvgPlot(
     </linearGradient>
   </defs>`);
 
-  svg_elements.push('  <rect x="-210" y="-200" width="420" height="440" fill="none" />');
+  svg_elements.push('  <rect x="-210" y="-200" width="420" height="620" fill="none" />');
 
-  for (const domain_id of domains_list) {
+  domains_list.forEach((domain_id, idx) => {
     const domain_nodes = nodes_data.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);
-    if (domain_nodes.length === 0) continue;
+    if (domain_nodes.length === 0) return;
 
-    const color = domainColors[domain_id] || "#777777";
+    const color = getDomainColor(domain_id, idx);
     const [cx, cy] = centers[domain_id];
 
     const scx = cx * scale;
     const scy = cy * scale;
     const sradius = 3.6 * scale;
-    svg_elements.push(`  <circle cx="${scx.toFixed(2)}" cy="${scy.toFixed(2)}" r="${sradius.toFixed(2)}" fill="${color}" opacity="0.07" stroke="${color}" stroke-dasharray="2 2" stroke-width="0.7" />`);
-
-    const domain_obj = domains_data.find(d => String(d.id) === domain_id);
-    let domain_name = domain_obj ? domain_obj.name : `Domain ${domain_id}`;
-    domain_name = escapeHtml(domain_name);
-
-    const norm = Math.sqrt(cx*cx + cy*cy);
-    let label_x, label_y;
-    if (norm > 0) {
-      label_x = cx + 3.8 * (cx / norm);
-      label_y = cy + 3.8 * (cy / norm);
-    } else {
-      label_x = cx;
-      label_y = cy + 3.8;
-    }
-
-    const slx = label_x * scale;
-    const sly = label_y * scale;
-
-    const words = domain_name.split(" ");
-    if (words.length > 2) {
-      const mid = Math.floor(words.length / 2);
-      const line1 = words.slice(0, mid).join(" ");
-      const line2 = words.slice(mid).join(" ");
-      svg_elements.push(`  <g>
-    <rect x="${(slx - 45).toFixed(1)}" y="${(sly - 12).toFixed(1)}" width="90" height="24" rx="4" fill="white" opacity="0.9" filter="drop-shadow(0px 1px 2px rgba(0,0,0,0.05))" />
-    <text x="${slx.toFixed(1)}" y="${(sly - 2).toFixed(1)}" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">${line1}</text>
-    <text x="${slx.toFixed(1)}" y="${(sly + 7).toFixed(1)}" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">${line2}</text>
-  </g>`);
-    } else {
-      svg_elements.push(`  <g>
-    <rect x="${(slx - 45).toFixed(1)}" y="${(sly - 7).toFixed(1)}" width="90" height="14" rx="4" fill="white" opacity="0.9" filter="drop-shadow(0px 1px 2px rgba(0,0,0,0.05))" />
-    <text x="${slx.toFixed(1)}" y="${(sly + 3).toFixed(1)}" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">${domain_name}</text>
-  </g>`);
-    }
-  }
+    // Elegant dashed stroke matching the domain color, enclosing its respective indicator nodes with high transparency
+    svg_elements.push(`  <circle cx="${scx.toFixed(2)}" cy="${scy.toFixed(2)}" r="${sradius.toFixed(2)}" fill="${color}" fill-opacity="0.125" stroke="${color}" stroke-opacity="0.25" stroke-dasharray="4 4" stroke-width="1.5" />`);
+  });
 
   for (const edge of edges_data) {
     const u = edge.source;
@@ -299,12 +288,41 @@ function generateSvgPlot(
     svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy + 2.5).toFixed(2)}" font-size="${font_size}" font-family="sans-serif" font-weight="900" fill="#0f172a" text-anchor="middle">${safe_abbr}</text>`);
   }
 
-  svg_elements.push(`  <g>
+  // Draw the Colorbar first, positioned cleanly below the network (translated down by 50px)
+  svg_elements.push(`  <g id="colorbar-container" transform="translate(0, 50)">
     <rect x="-70" y="200" width="140" height="7" fill="url(#colorbar-grad)" rx="1.5" />
     <text x="-70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">0.0 (Worst)</text>
     <text x="0" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">Indicator Stability (Sv)</text>
     <text x="70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">1.0 (Best)</text>
   </g>`);
+
+  // Draw Inline Domains & Indicators Legend Box inside the bottom of the image (no background color, below the color palette)
+  svg_elements.push(`  <g id="image-legend-container">
+    <text x="-190" y="295" font-size="8" font-family="sans-serif" font-weight="bold" fill="#64748b" text-anchor="start">NETWORK DOMAINS</text>
+  </g>`);
+
+  domains_list.forEach((domain_id, idx) => {
+    const col = idx % 4;
+    const row = Math.floor(idx / 4);
+    const colWidth = 98;
+    const startX = -190;
+    const startY = 312;
+    const x = startX + col * colWidth;
+    const y = startY + row * 15;
+
+    const color = getDomainColor(domain_id, idx);
+    const domain_obj = domains_data.find(d => String(d.id) === domain_id);
+    const domain_name = domain_obj ? domain_obj.name : `Domain ${domain_id}`;
+    
+    // Truncate domain name if it is long
+    const displayName = domain_name.length > 22 ? domain_name.substring(0, 20) + ".." : domain_name;
+    const labelText = `D${domain_id}: ${displayName}`;
+
+    svg_elements.push(`  <g transform="translate(${x.toFixed(1)}, ${y.toFixed(1)})">
+    <circle cx="4" cy="2" r="3.5" fill="${color}" stroke="none" />
+    <text x="12" y="5" font-size="7" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="start">${escapeHtml(labelText)}</text>
+  </g>`);
+  });
 
   svg_elements.push('</svg>');
   const svg_str = svg_elements.join("\n");
@@ -511,4 +529,40 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
     domain_spillover,
     plots
   };
+}
+
+export function generateStaticNetworkSvg(
+  nodes: NodeData[],
+  edges: EdgeData[],
+  domains: DomainData[]
+): string {
+  const domains_list = Array.from(new Set(nodes.map(n => String(n.domain_id)))).sort();
+  const num_domains = domains_list.length;
+  const centers: Record<string, [number, number]> = {};
+  
+  domains_list.forEach((domain_id, i) => {
+    const angle = num_domains > 0 ? 2 * Math.PI * i / num_domains : 0;
+    centers[domain_id] = [10.0 * Math.cos(angle), 10.0 * Math.sin(angle)];
+  });
+
+  const pos: Record<string, [number, number]> = {};
+  domains_list.forEach(domain_id => {
+    const domain_nodes = nodes.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);
+    const num_nodes_in_dim = domain_nodes.length;
+    domain_nodes.forEach((node_abbr, j) => {
+      const node_angle = num_nodes_in_dim > 0 ? 2 * Math.PI * j / num_nodes_in_dim : 0;
+      const r = 2.4;
+      const [cx, cy] = centers[domain_id];
+      pos[node_abbr] = [cx + r * Math.cos(node_angle), cy + r * Math.sin(node_angle)];
+    });
+  });
+
+  const nodes_domain: Record<string, string> = {};
+  const history: Record<string, number[]> = {};
+  nodes.forEach(node => {
+    nodes_domain[node.abbr] = String(node.domain_id);
+    history[node.abbr] = [1.0];
+  });
+
+  return generateSvgPlot(nodes, edges, domains, history, 0, pos, centers, domains_list, nodes_domain);
 }

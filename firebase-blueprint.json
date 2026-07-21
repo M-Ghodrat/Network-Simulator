@@ -56,12 +56,26 @@
         }
       },
       "required": ["id", "T", "theta", "gamma", "epsilon", "rv"]
+    },
+    "SavedNetworkConfig": {
+      "title": "SavedNetworkConfig",
+      "description": "A saved backup configuration of the resilience network",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Custom name assigned to the backup" },
+        "savedAt": { "type": "string", "description": "Timestamp of the backup creation" },
+        "domains": { "type": "array", "description": "Cloned domains list" },
+        "nodes": { "type": "array", "description": "Cloned indicator nodes list" },
+        "edges": { "type": "array", "description": "Cloned structural connections" },
+        "params": { "$ref": "#/definitions/SimulatorParams", "description": "Associated simulation parameters" }
+      },
+      "required": ["name", "savedAt", "domains", "nodes", "edges", "params"]
     }
   },
   "firestore": {
-    "dimensions/{dimensionId}": {
+    "domains/{domainId}": {
       "schema": "Dimension",
-      "description": "The resilience dimensions"
+      "description": "The resilience domains"
     },
     "nodes/{nodeId}": {
       "schema": "NodeIndicator",
@@ -74,6 +88,10 @@
     "params/{paramId}": {
       "schema": "SimulatorParams",
       "description": "Persistent simulation parameter profiles"
+    },
+    "users/{userId}/saved_config/{configId}": {
+      "schema": "SavedNetworkConfig",
+      "description": "User's single backup slot for custom network layouts"
     }
   }
 }

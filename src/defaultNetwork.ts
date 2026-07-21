@@ -188,25 +188,25 @@ export const SIMPLE_DOMAINS: Domain[] = [
 ];
 
 export const SIMPLE_NODES: NodeIndicator[] = [
-  { id: "n1", abbr: "N1", full_name: "Indicator 1", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n2", abbr: "N2", full_name: "Indicator 2", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n3", abbr: "N3", full_name: "Indicator 3", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N1", abbr: "N1", full_name: "Indicator 1", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N2", abbr: "N2", full_name: "Indicator 2", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N3", abbr: "N3", full_name: "Indicator 3", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "n4", abbr: "N4", full_name: "Indicator 4", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n5", abbr: "N5", full_name: "Indicator 5", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n6", abbr: "N6", full_name: "Indicator 6", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n7", abbr: "N7", full_name: "Indicator 7", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N4", abbr: "N4", full_name: "Indicator 4", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N5", abbr: "N5", full_name: "Indicator 5", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N6", abbr: "N6", full_name: "Indicator 6", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N7", abbr: "N7", full_name: "Indicator 7", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "n8", abbr: "N8", full_name: "Indicator 8", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n9", abbr: "N9", full_name: "Indicator 9", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n10", abbr: "N10", full_name: "Indicator 10", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n11", abbr: "N11", full_name: "Indicator 11", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N8", abbr: "N8", full_name: "Indicator 8", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N9", abbr: "N9", full_name: "Indicator 9", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N10", abbr: "N10", full_name: "Indicator 10", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N11", abbr: "N11", full_name: "Indicator 11", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "n12", abbr: "N12", full_name: "Indicator 12", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n13", abbr: "N13", full_name: "Indicator 13", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n14", abbr: "N14", full_name: "Indicator 14", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n15", abbr: "N15", full_name: "Indicator 15", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "n16", abbr: "N16", full_name: "Indicator 16", domain_id: "4", theta: 0.2, recovery_rate: 0.05 }
+  { id: "N12", abbr: "N12", full_name: "Indicator 12", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N13", abbr: "N13", full_name: "Indicator 13", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N14", abbr: "N14", full_name: "Indicator 14", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N15", abbr: "N15", full_name: "Indicator 15", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "N16", abbr: "N16", full_name: "Indicator 16", domain_id: "4", theta: 0.2, recovery_rate: 0.05 }
 ];
 
 export function parseSimpleEdges(): Edge[] {

@@ -50,3 +50,13 @@ export interface SimulatorParams {
   shocks: Shock[];
   interventions: Intervention[];
 }
+
+export interface SavedNetworkConfig {
+  name: string;
+  savedAt: string;
+  domains: Domain[];
+  nodes: NodeIndicator[];
+  edges: Edge[];
+  params: SimulatorParams;
+}
+

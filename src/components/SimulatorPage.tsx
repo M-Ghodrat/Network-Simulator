@@ -919,7 +919,12 @@ export default function SimulatorPage() {
                     <Bar dataKey="fraction" fill="#4f46e5" radius={[4, 4, 0, 0]}>
                       {getSpilloverBarData().map((entry, index) => {
                         // use unique colors matching domain scheme if possible
-                        const colors = ["#4169E1", "#2E8B57", "#228B22", "#FF69B4", "#8A2BE2", "#FF8C00", "#D2691E"];
+                        const colors = [
+                          "#3b82f6", "#10b981", "#ec4899", "#f59e0b", "#8b5cf6",
+                          "#ef4444", "#06b6d4", "#f97316", "#14b8a6", "#a855f7",
+                          "#84cc16", "#6366f1", "#d946ef", "#ff7f50", "#008080",
+                          "#b22222", "#4b0082", "#2e8b57", "#708090", "#9a3412"
+                        ];
                         return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
                       })}
                     </Bar>

@@ -1,6 +1,6 @@
-import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDocs, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Domain, NodeIndicator, Edge, SimulatorParams } from "./types";
+import { Domain, NodeIndicator, Edge, SimulatorParams, SavedNetworkConfig } from "./types";
 import { DEFAULT_DOMAINS, DEFAULT_NODES, parseDefaultEdges, SIMPLE_DOMAINS, SIMPLE_NODES, parseSimpleEdges } from "./defaultNetwork";
 
 type Listener<T> = (data: T[]) => void;
@@ -72,7 +72,97 @@ class DataService {
 
     // Set up real-time listeners for the new user
     if (user) {
+      this.saveUserMetadata(user);
+      this.runFirestoreMigrations(user);
       this.initUserListeners();
+    }
+  }
+
+  private async runFirestoreMigrations(user: any) {
+    if (!user || user.isLocal) return;
+
+    try {
+      // 1. Remove legacy literal user document IDs ("user1", "user2", "user3", "admin") from the users collection
+      const legacyUserIds = ["user1", "user2", "user3", "admin"];
+      for (const id of legacyUserIds) {
+        const legacyRef = doc(db, "users", id);
+        const snap = await getDoc(legacyRef);
+        if (snap.exists()) {
+          console.log(`Cleaning up legacy literal user document: users/${id}`);
+          await deleteDoc(legacyRef);
+        }
+      }
+
+      // 2. Remove legacy subcollection 'dimensions' for this user
+      const userDimensionsRef = collection(db, "users", user.uid, "dimensions");
+      const userDimsSnap = await getDocs(userDimensionsRef);
+      if (!userDimsSnap.empty) {
+        console.log(`Cleaning up legacy user dimensions subcollection for ${user.uid}...`);
+        for (const d of userDimsSnap.docs) {
+          await deleteDoc(d.ref);
+        }
+      }
+
+      // 2. Rename root-level collection 'dimensions' to 'domains', write admin URSA network domains, and delete old 'dimensions'
+      // Always write the admin URSA network domains (DEFAULT_DOMAINS) to the root-level 'domains' collection
+      console.log("Writing admin URSA network domains to root-level 'domains' collection...");
+      for (const domain of DEFAULT_DOMAINS) {
+        await setDoc(doc(db, "domains", domain.id), domain);
+      }
+
+      const rootDimensionsRef = collection(db, "dimensions");
+      const rootDimsSnap = await getDocs(rootDimensionsRef);
+      if (!rootDimsSnap.empty) {
+        console.log("Migrating and cleaning up root-level collection 'dimensions' to 'domains'...");
+        for (const d of rootDimsSnap.docs) {
+          const data = d.data();
+          // Write to the new root collection 'domains'
+          await setDoc(doc(db, "domains", d.id), data, { merge: true });
+          // Delete from the old root collection 'dimensions'
+          await deleteDoc(d.ref);
+        }
+        console.log("Root-level 'dimensions' successfully migrated and cleaned up.");
+      }
+    } catch (e) {
+      console.warn("Firestore migration / cleanup failed:", e);
+    }
+  }
+
+  private async saveUserMetadata(user: any) {
+    if (!user) return;
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const emailPrefix = user.email ? user.email.split("@")[0].toLowerCase() : "";
+      const userName = emailPrefix || "anonymous";
+      const name = userName; // Match user request: name (e.g. mohsenghodrat2)
+      
+      let displayName = user.displayName || "";
+      if (!displayName) {
+        if (emailPrefix === "user1") {
+          displayName = "User 1";
+        } else if (emailPrefix === "user2") {
+          displayName = "User 2";
+        } else if (emailPrefix === "user3") {
+          displayName = "User 3";
+        } else if (emailPrefix === "admin") {
+          displayName = "Admin";
+        } else if (emailPrefix) {
+          displayName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+        } else {
+          displayName = "Anonymous User";
+        }
+      }
+
+      await setDoc(userRef, {
+        uid: user.uid,
+        email: user.email || "",
+        displayName: displayName,
+        userName: userName,
+        name: name,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to write user metadata to Firestore:", e);
     }
   }
 
@@ -111,7 +201,20 @@ class DataService {
         (snapshot) => {
           if (!snapshot.empty) {
             const list: NodeIndicator[] = [];
-            snapshot.forEach((doc) => list.push(doc.data() as NodeIndicator));
+            const seenAbbrs = new Set<string>();
+            snapshot.forEach((doc) => {
+              const node = doc.data() as NodeIndicator;
+              const standardizedId = node.abbr.trim().toUpperCase();
+              const standardizedNode: NodeIndicator = {
+                ...node,
+                id: standardizedId,
+                abbr: standardizedId
+              };
+              if (!seenAbbrs.has(standardizedNode.abbr)) {
+                seenAbbrs.add(standardizedNode.abbr);
+                list.push(standardizedNode);
+              }
+            });
             list.sort((a, b) => a.abbr.localeCompare(b.abbr));
             this.nodes = list;
           } else {
@@ -189,12 +292,20 @@ class DataService {
     
     if (isAdmin) {
       this.domains = [...DEFAULT_DOMAINS];
-      this.nodes = [...DEFAULT_NODES];
+      this.nodes = DEFAULT_NODES.map(node => ({
+        ...node,
+        id: node.abbr.toUpperCase(),
+        abbr: node.abbr.toUpperCase()
+      }));
       this.edges = parseDefaultEdges();
       this.params = { ...DEFAULT_PARAMS };
     } else {
       this.domains = [...SIMPLE_DOMAINS];
-      this.nodes = [...SIMPLE_NODES];
+      this.nodes = SIMPLE_NODES.map(node => ({
+        ...node,
+        id: node.abbr.toUpperCase(),
+        abbr: node.abbr.toUpperCase()
+      }));
       this.edges = parseSimpleEdges();
       this.params = { ...SIMPLE_PARAMS };
     }
@@ -223,7 +334,24 @@ class DataService {
 
       if (savedDomains && savedNodes && savedEdges) {
         this.domains = JSON.parse(savedDomains);
-        this.nodes = JSON.parse(savedNodes);
+        
+        const rawNodes = JSON.parse(savedNodes) as NodeIndicator[];
+        const normalizedList: NodeIndicator[] = [];
+        const seenAbbrs = new Set<string>();
+        for (const n of rawNodes) {
+          const standardizedId = n.abbr.trim().toUpperCase();
+          const standardizedNode = {
+            ...n,
+            id: standardizedId,
+            abbr: standardizedId
+          };
+          if (!seenAbbrs.has(standardizedNode.abbr)) {
+            seenAbbrs.add(standardizedNode.abbr);
+            normalizedList.push(standardizedNode);
+          }
+        }
+        this.nodes = normalizedList;
+
         this.edges = JSON.parse(savedEdges);
         if (savedParams) {
           this.params = JSON.parse(savedParams);
@@ -334,18 +462,134 @@ class DataService {
     return this.isLoaded;
   }
 
+  // Save custom network configuration
+  public async saveCustomNetworkConfig(name: string): Promise<void> {
+    const config: SavedNetworkConfig = {
+      name: name.trim(),
+      savedAt: new Date().toLocaleString(),
+      domains: [...this.domains],
+      nodes: [...this.nodes],
+      edges: [...this.edges],
+      params: { ...this.params }
+    };
+
+    const uid = this.currentUser ? this.currentUser.uid : "global";
+    
+    // Save to local storage
+    try {
+      localStorage.setItem(`network_saved_config_${uid}`, JSON.stringify(config));
+    } catch (e) {
+      console.error("Failed to save custom config to local storage:", e);
+    }
+
+    // Save to Firestore if connected
+    if (!this.isLocalOnly && this.currentUser) {
+      try {
+        await setDoc(doc(db, "users", uid, "saved_config", "latest"), config);
+      } catch (e) {
+        console.warn("Failed to write saved config to Firestore:", e);
+      }
+    }
+  }
+
+  // Get custom network configuration
+  public async getCustomNetworkConfig(): Promise<SavedNetworkConfig | null> {
+    const uid = this.currentUser ? this.currentUser.uid : "global";
+    
+    // Attempt to read from Firestore first if online
+    if (!this.isLocalOnly && this.currentUser) {
+      try {
+        const snap = await getDoc(doc(db, "users", uid, "saved_config", "latest"));
+        if (snap.exists()) {
+          return snap.data() as SavedNetworkConfig;
+        }
+      } catch (e) {
+        console.warn("Failed to read saved config from Firestore, falling back to local:", e);
+      }
+    }
+
+    // Fallback to local storage
+    try {
+      const saved = localStorage.getItem(`network_saved_config_${uid}`);
+      if (saved) {
+        return JSON.parse(saved) as SavedNetworkConfig;
+      }
+    } catch (e) {
+      console.error("Failed to read saved config from local storage:", e);
+    }
+
+    return null;
+  }
+
+  // Load / Restore a saved configuration
+  public async restoreCustomNetworkConfig(config: SavedNetworkConfig): Promise<void> {
+    const normalizedNodes = config.nodes.map(node => ({
+      ...node,
+      id: node.abbr.toUpperCase(),
+      abbr: node.abbr.toUpperCase()
+    }));
+
+    // 1. Update local state
+    this.domains = [...config.domains];
+    this.nodes = normalizedNodes;
+    this.edges = [...config.edges];
+    this.params = { ...config.params };
+
+    this.saveToLocalStorageOnly();
+    this.notifyAll();
+
+    // 2. Sync to Firestore if online
+    if (!this.isLocalOnly && this.currentUser) {
+      const uid = this.currentUser.uid;
+      try {
+        // Clear active network in Firestore only, preventing local state reset
+        await this.clearFirestoreNetwork(uid);
+
+        // Write domains
+        for (const domain of config.domains) {
+          await setDoc(doc(db, "users", uid, "domains", domain.id), domain);
+        }
+        // Write nodes
+        for (const node of normalizedNodes) {
+          await setDoc(doc(db, "users", uid, "nodes", node.id), node);
+        }
+        // Write edges
+        for (let i = 0; i < config.edges.length; i += 400) {
+          const edgeBatch = writeBatch(db);
+          const chunk = config.edges.slice(i, i + 400);
+          chunk.forEach((edge) => {
+            edgeBatch.set(doc(db, "users", uid, "edges", edge.id), edge);
+          });
+          await edgeBatch.commit();
+        }
+        // Write params
+        await setDoc(doc(db, "users", uid, "params", "default"), config.params);
+      } catch (e) {
+        console.warn("Syncing restored config to Firestore failed:", e);
+      }
+    }
+  }
+
   // Seeding/Reset helper
   public async importDefaultNetwork() {
-    // Load local defaults first for instant UI response
+    // 1. Clear current state (local & Firestore) first to ensure clean overwrite
+    await this.clearNetwork();
+
+    // 2. Load local defaults
     this.loadDefaults();
+    this.saveToLocalStorageOnly();
+    this.notifyAll();
 
     if (!this.isLocalOnly && this.currentUser) {
       const uid = this.currentUser.uid;
       try {
-        // Clear previous state by writing defaults
         const isAdmin = this.currentUser?.email?.toLowerCase().includes("admin") ?? false;
         const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
-        const nodesToLoad = isAdmin ? DEFAULT_NODES : SIMPLE_NODES;
+        const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map(node => ({
+          ...node,
+          id: node.abbr.toUpperCase(),
+          abbr: node.abbr.toUpperCase()
+        }));
         const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
 
         for (const domain of domainsToLoad) {
@@ -410,11 +654,18 @@ class DataService {
   }
 
   public async saveNode(node: NodeIndicator) {
-    const exists = this.nodes.some(n => n.id === node.id);
+    const standardizedId = node.abbr.trim().toUpperCase();
+    const standardizedNode: NodeIndicator = {
+      ...node,
+      id: standardizedId,
+      abbr: standardizedId
+    };
+
+    const exists = this.nodes.some(n => n.id.toUpperCase() === standardizedId || n.abbr.toUpperCase() === standardizedId);
     if (exists) {
-      this.nodes = this.nodes.map(n => n.id === node.id ? node : n);
+      this.nodes = this.nodes.map(n => (n.id.toUpperCase() === standardizedId || n.abbr.toUpperCase() === standardizedId) ? standardizedNode : n);
     } else {
-      this.nodes = [...this.nodes, node];
+      this.nodes = [...this.nodes, standardizedNode];
       this.nodes.sort((a, b) => a.abbr.localeCompare(b.abbr));
     }
     this.saveToLocalStorageOnly();
@@ -422,7 +673,12 @@ class DataService {
 
     if (!this.isLocalOnly && this.currentUser) {
       try {
-        await setDoc(doc(db, "users", this.currentUser.uid, "nodes", node.id), node);
+        await setDoc(doc(db, "users", this.currentUser.uid, "nodes", standardizedId), standardizedNode);
+        
+        const originalId = node.id;
+        if (originalId && originalId !== standardizedId) {
+          await deleteDoc(doc(db, "users", this.currentUser.uid, "nodes", originalId));
+        }
       } catch (e) {
         console.warn("Failed to write to Firestore, saved locally:", e);
       }
@@ -430,9 +686,10 @@ class DataService {
   }
 
   public async deleteNode(id: string) {
+    const uppercaseId = id.toUpperCase();
     // Also delete any edges connected to this node
-    this.edges = this.edges.filter(edge => edge.source !== id && edge.target !== id);
-    this.nodes = this.nodes.filter(n => n.id !== id);
+    this.edges = this.edges.filter(edge => edge.source.toUpperCase() !== uppercaseId && edge.target.toUpperCase() !== uppercaseId);
+    this.nodes = this.nodes.filter(n => n.id.toUpperCase() !== uppercaseId && n.abbr.toUpperCase() !== uppercaseId);
     this.saveToLocalStorageOnly();
     this.notifyNodeListeners();
     this.notifyEdgeListeners();
@@ -440,6 +697,9 @@ class DataService {
     if (!this.isLocalOnly && this.currentUser) {
       try {
         await deleteDoc(doc(db, "users", this.currentUser.uid, "nodes", id));
+        if (id !== uppercaseId) {
+          await deleteDoc(doc(db, "users", this.currentUser.uid, "nodes", uppercaseId));
+        }
       } catch (e) {
         console.warn("Failed to write to Firestore, deleted locally:", e);
       }
@@ -464,6 +724,35 @@ class DataService {
   }
 
 
+  private async clearFirestoreNetwork(uid: string) {
+    try {
+      const dimsRef = collection(db, "users", uid, "domains");
+      const dimsSnap = await getDocs(dimsRef);
+      for (const d of dimsSnap.docs) {
+        await deleteDoc(d.ref);
+      }
+
+      const nodesRef = collection(db, "users", uid, "nodes");
+      const nodesSnap = await getDocs(nodesRef);
+      for (const n of nodesSnap.docs) {
+        await deleteDoc(n.ref);
+      }
+
+      const edgesRef = collection(db, "users", uid, "edges");
+      const edgesSnap = await getDocs(edgesRef);
+      for (let i = 0; i < edgesSnap.docs.length; i += 400) {
+        const batch = writeBatch(db);
+        const chunk = edgesSnap.docs.slice(i, i + 400);
+        chunk.forEach((docSnap) => {
+          batch.delete(docSnap.ref);
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Failed to clear Firestore:", e);
+    }
+  }
+
   public async clearNetwork() {
     this.domains = [];
     this.nodes = [];
@@ -472,33 +761,7 @@ class DataService {
     this.notifyAll();
 
     if (!this.isLocalOnly && this.currentUser) {
-      const uid = this.currentUser.uid;
-      try {
-        const dimsRef = collection(db, "users", uid, "domains");
-        const dimsSnap = await getDocs(dimsRef);
-        for (const d of dimsSnap.docs) {
-          await deleteDoc(d.ref);
-        }
-
-        const nodesRef = collection(db, "users", uid, "nodes");
-        const nodesSnap = await getDocs(nodesRef);
-        for (const n of nodesSnap.docs) {
-          await deleteDoc(n.ref);
-        }
-
-        const edgesRef = collection(db, "users", uid, "edges");
-        const edgesSnap = await getDocs(edgesRef);
-        for (let i = 0; i < edgesSnap.docs.length; i += 400) {
-          const batch = writeBatch(db);
-          const chunk = edgesSnap.docs.slice(i, i + 400);
-          chunk.forEach((docSnap) => {
-            batch.delete(docSnap.ref);
-          });
-          await batch.commit();
-        }
-      } catch (e) {
-        console.warn("Failed to clear Firestore, cleared locally:", e);
-      }
+      await this.clearFirestoreNetwork(this.currentUser.uid);
     }
   }
 

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { BookOpen, Network, Shield, AlertTriangle, Layers, PlayCircle, Info } from "lucide-react";
+import PracticeLab from "./PracticeLab";
 
-type Tab = "general" | "indegree" | "outdegree" | "betweenness";
+type Tab = "general" | "indegree" | "outdegree" | "betweenness" | "lab";
 
 export default function LearnPage() {
   const [activeTab, setActiveTab] = useState<Tab>("general");
@@ -60,6 +61,15 @@ export default function LearnPage() {
       >
         <PlayCircle size={16} className={activeTab === "betweenness" ? "text-indigo-600" : "text-slate-400"} />
         Betweenness
+      </button>
+      <button
+        onClick={() => setActiveTab("lab")}
+        className={`flex-1 min-w-[120px] px-4 py-2.5 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${
+          activeTab === "lab" ? "bg-indigo-50 text-indigo-900 shadow-xs border border-indigo-200" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+        }`}
+      >
+        <Network size={16} className={activeTab === "lab" ? "text-indigo-600 animate-pulse" : "text-slate-400"} />
+        Practice Lab
       </button>
     </div>
   );
@@ -217,7 +227,13 @@ export default function LearnPage() {
       {renderTabs()}
 
       <div className="min-h-[400px]">
-        {activeTab === "general" ? renderGeneralContent() : renderVideoSection(activeTab)}
+        {activeTab === "general" ? (
+          renderGeneralContent()
+        ) : activeTab === "lab" ? (
+          <PracticeLab />
+        ) : (
+          renderVideoSection(activeTab)
+        )}
       </div>
     </div>
   );

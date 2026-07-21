@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Domain, NodeIndicator, Edge } from "../types";
+import { Domain, NodeIndicator, Edge, SavedNetworkConfig } from "../types";
 import { dataService } from "../dataService";
-import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database } from "lucide-react";
+import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { auth } from "../firebase";
+import { generateStaticNetworkSvg } from "../lib/simulationClient";
 
 export default function ConfigPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -68,7 +69,26 @@ export default function ConfigPage() {
   };
 
   // Tabs for sub-sections
-  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges">("nodes");
+  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges" | "network">("nodes");
+  const [networkScale, setNetworkScale] = useState(80);
+
+  // Saved custom configuration states
+  const [savedConfig, setSavedConfig] = useState<SavedNetworkConfig | null>(null);
+  const [saveName, setSaveName] = useState("");
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const config = await dataService.getCustomNetworkConfig();
+        setSavedConfig(config);
+      } catch (err) {
+        console.warn("Failed to fetch saved config:", err);
+      }
+    };
+    fetchConfig();
+  }, [currentUser, isLocal]);
 
   // CRUD Form States - Domains
   const [domainForm, setDomainForm] = useState({ id: "", name: "" });
@@ -239,6 +259,78 @@ export default function ConfigPage() {
       return;
     }
 
+    if (!/^[A-Z0-9_\-]+$/i.test(abbr)) {
+      setModal({
+        isOpen: true,
+        title: "Invalid Abbreviation",
+        message: "The indicator abbreviation contains characters that are not allowed. It can only contain letters, numbers, hyphens (-), and underscores (_). Special characters (such as '/') are strictly forbidden to prevent database storage issues. Please modify the abbreviation.",
+        confirmText: "OK",
+        showCancel: false,
+        type: "danger",
+        onConfirm: closeModal
+      });
+      return;
+    }
+
+    // Check if we are editing and changing the abbreviation/ID
+    if (editingNodeId && editingNodeId !== abbr) {
+      // Check if new abbreviation already exists
+      const exists = nodes.some((n) => n.id.toUpperCase() === abbr || n.abbr.toUpperCase() === abbr);
+      if (exists) {
+        showFeedback(`An indicator with abbreviation "${abbr}" already exists!`, "error");
+        return;
+      }
+
+      try {
+        // Find connected edges
+        const connectedEdges = edges.filter((edge) => edge.source === editingNodeId || edge.target === editingNodeId);
+        
+        // Save new node first
+        const newNode: NodeIndicator = {
+          id: abbr,
+          abbr: abbr,
+          full_name: nodeForm.full_name.trim(),
+          domain_id: nodeForm.domain_id,
+          theta: Number(nodeForm.theta),
+          recovery_rate: Number(nodeForm.recovery_rate)
+        };
+        await dataService.saveNode(newNode);
+
+        // Update each connected edge to use the new abbreviation
+        for (const oldEdge of connectedEdges) {
+          const newSource = oldEdge.source === editingNodeId ? abbr : oldEdge.source;
+          const newTarget = oldEdge.target === editingNodeId ? abbr : oldEdge.target;
+          const newEdge: Edge = {
+            id: `${newSource}-${newTarget}`,
+            source: newSource,
+            target: newTarget,
+            weight: oldEdge.weight
+          };
+          
+          await dataService.saveEdge(newEdge);
+          // Delete old edge
+          await dataService.deleteEdge(oldEdge.id);
+        }
+
+        // Delete old node
+        await dataService.deleteNode(editingNodeId);
+
+        setNodeForm({
+          id: "",
+          abbr: "",
+          full_name: "",
+          domain_id: domains[0]?.id || "1",
+          theta: 0.2,
+          recovery_rate: 0.05
+        });
+        setEditingNodeId(null);
+        showFeedback(`Indicator renamed to ${newNode.abbr} and saved successfully!`, "success");
+      } catch (err: any) {
+        showFeedback(`Failed to rename indicator: ${err.message}`, "error");
+      }
+      return;
+    }
+
     try {
       const newNode: NodeIndicator = {
         id: abbr,
@@ -394,24 +486,33 @@ export default function ConfigPage() {
             Manage your city resilience model's indicators, domains, and structural dependencies.
           </p>
         </div>
-<div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={handleClearNetwork}
             disabled={loading}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
             id="clear-network-btn"
           >
-            <Trash2 size={14} className={loading ? "opacity-50" : ""} />
+            <Trash2 size={13} className={loading ? "opacity-50" : ""} />
             Clear Network
           </button>
           <button
-            onClick={handleImportDefaultNetwork}
+            onClick={() => setIsSaveModalOpen(true)}
             disabled={loading}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
-            id="seed-network-btn"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+            id="save-backup-btn"
           >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            Import Default Network
+            <Save size={13} />
+            Save Backup
+          </button>
+          <button
+            onClick={() => setIsLoadModalOpen(true)}
+            disabled={loading}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+            id="restore-network-btn"
+          >
+            <FolderOpen size={13} className={loading ? "animate-spin" : ""} />
+            Import / Restore
           </button>
         </div>
       </div>
@@ -463,6 +564,20 @@ export default function ConfigPage() {
             <span>Domains</span>
             <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
               {domains.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("network")}
+            className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
+              activeTab === "network" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Network size={12} className="text-slate-400" />
+              <span>Network Map</span>
+            </span>
+            <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
+              Static
             </span>
           </button>
 
@@ -591,7 +706,6 @@ export default function ConfigPage() {
                       <input
                         type="text"
                         maxLength={4}
-                        disabled={!!editingNodeId}
                         value={nodeForm.abbr}
                         onChange={(e) => setNodeForm({ ...nodeForm, abbr: e.target.value })}
                         placeholder="e.g. BI"
@@ -742,7 +856,11 @@ export default function ConfigPage() {
                           const dName = domains.find((d) => d.id === node.domain_id)?.name || `Domain ${node.domain_id}`;
                           return (
                             <tr key={node.abbr} className="hover:bg-slate-50/30 transition-colors">
-                              <td className="p-3 font-mono font-bold text-slate-900">{node.abbr}</td>
+                              <td className="p-3">
+                                <span className="inline-block px-2 py-0.5 rounded bg-slate-800 text-white font-mono font-bold text-xs">
+                                  {node.abbr}
+                                </span>
+                              </td>
                               <td className="p-3 font-medium font-sans">{node.full_name}</td>
                               <td className="p-3">
                                 <span className="bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded-full font-sans">
@@ -755,9 +873,9 @@ export default function ConfigPage() {
                                 <div className="flex gap-2 justify-end">
                                   <button
                                     onClick={() => {
-                                      setEditingNodeId(node.abbr);
+                                      setEditingNodeId(node.id);
                                       setNodeForm({
-                                        id: node.abbr,
+                                        id: node.id,
                                         abbr: node.abbr,
                                         full_name: node.full_name,
                                         domain_id: node.domain_id,
@@ -918,6 +1036,60 @@ export default function ConfigPage() {
               </div>
             </div>
           )}
+
+          {!loading && activeTab === "network" && (
+            <div className="space-y-6 animate-fade-in" id="network-tab">
+              <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="space-y-0.5">
+                    <h3 className="text-sm font-bold text-slate-900 font-sans">
+                      Resilience Network Architecture Map
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Static visualization of domains, indicator nodes, and inter-indicator influence paths.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                      <span className="font-semibold tracking-wider uppercase">Zoom</span>
+                      <input
+                        type="range"
+                        min="50"
+                        max="100"
+                        step="10"
+                        value={networkScale}
+                        onChange={(e) => setNetworkScale(Number(e.target.value))}
+                        className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                      />
+                      <span className="w-8 text-right">{networkScale}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center min-h-[520px] overflow-auto p-4" id="network-map-stage">
+                  {nodes.length === 0 ? (
+                    <div className="p-8 text-center space-y-3 max-w-sm">
+                      <Network size={40} className="text-slate-300 mx-auto stroke-1" />
+                      <h3 className="text-xs font-bold text-slate-700">No nodes configured</h3>
+                      <p className="text-slate-400 text-[11px] leading-relaxed">
+                        Please import the default network or add indicator nodes to visualize the structure.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <img
+                        src={generateStaticNetworkSvg(nodes, edges, domains)}
+                        alt="Resilience Network Architecture Map"
+                        style={{ width: `${networkScale}%` }}
+                        className="h-auto object-contain drop-shadow-xs select-none transition-all duration-200"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -933,6 +1105,181 @@ export default function ConfigPage() {
         onConfirm={modal.onConfirm}
         onCancel={closeModal}
       />
+
+      {/* Save Custom Network Configuration Modal */}
+      {isSaveModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden p-6 relative space-y-4 animate-scale-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100">
+                <Save size={18} className="text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 font-sans">Save Current Network Configuration</h3>
+                <p className="text-[11px] text-slate-400">This will overwrite your previously saved configuration.</p>
+              </div>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!saveName.trim()) return;
+              setIsSaveModalOpen(false);
+              setLoading(true);
+              try {
+                await dataService.saveCustomNetworkConfig(saveName);
+                const config = await dataService.getCustomNetworkConfig();
+                setSavedConfig(config);
+                showFeedback(`Configuration "${saveName}" saved successfully!`, "success");
+                setSaveName("");
+              } catch (err: any) {
+                showFeedback(`Save failed: ${err.message}`, "error");
+              } finally {
+                setLoading(false);
+              }
+            }} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Configuration Name</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={40}
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder="e.g. Optimized Transit Model v2"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-sans focus:ring-1 focus:ring-slate-900 focus:outline-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSaveModalOpen(false);
+                    setSaveName("");
+                  }}
+                  className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!saveName.trim()}
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Save Configuration
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import / Restore Network Modal */}
+      {isLoadModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden p-6 relative space-y-4 animate-scale-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center border border-indigo-100">
+                <FolderOpen size={18} className="text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 font-sans">Import & Restore Network</h3>
+                <p className="text-[11px] text-slate-400">Choose a default network structure or restore your last saved configuration.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {/* Option 1: System Default */}
+              <div className="border border-slate-200 hover:border-indigo-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-slate-50/50 hover:bg-indigo-50/10 transition-all">
+                <div className="space-y-1.5">
+                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    System Default Network
+                  </h4>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Resets the entire canvas to the standard city resilience configuration designed for your account profile role.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsLoadModalOpen(false);
+                    handleImportDefaultNetwork();
+                  }}
+                  className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw size={12} />
+                  Load Default
+                </button>
+              </div>
+
+              {/* Option 2: Saved Config */}
+              <div className="border border-slate-200 hover:border-emerald-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-slate-50/50 hover:bg-emerald-50/10 transition-all">
+                <div className="space-y-1.5">
+                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Last Saved Config
+                  </h4>
+                  {savedConfig ? (
+                    <div className="space-y-1">
+                      <p className="text-[11px] font-semibold text-emerald-800 line-clamp-1">
+                        "{savedConfig.name}"
+                      </p>
+                      <p className="text-[9px] text-slate-400">
+                        Saved: {savedConfig.savedAt}
+                      </p>
+                      <p className="text-[9px] text-slate-500 leading-relaxed">
+                        Restores your custom indicators, domains, weights, and parameters.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 italic py-2">
+                      No saved configuration found. Save your network first.
+                    </p>
+                  )}
+                </div>
+                <button
+                  disabled={!savedConfig}
+                  onClick={() => {
+                    setIsLoadModalOpen(false);
+                    if (!savedConfig) return;
+                    setModal({
+                      isOpen: true,
+                      title: "Restore Saved Configuration?",
+                      message: `Are you sure you want to restore the saved configuration "${savedConfig.name}"? This will replace all active domains, nodes, and edges.`,
+                      confirmText: "Restore",
+                      cancelText: "Cancel",
+                      type: "success",
+                      onConfirm: async () => {
+                        closeModal();
+                        setLoading(true);
+                        try {
+                          await dataService.restoreCustomNetworkConfig(savedConfig);
+                          showFeedback(`Configuration "${savedConfig.name}" restored successfully!`, "success");
+                        } catch (err: any) {
+                          showFeedback(`Restore failed: ${err.message}`, "error");
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    });
+                  }}
+                  className="w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Save size={12} />
+                  Restore Saved
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setIsLoadModalOpen(false)}
+                className="px-4 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
