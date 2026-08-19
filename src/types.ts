@@ -47,6 +47,7 @@ export interface SimulatorParams {
   gamma: number;
   epsilon: number;
   rv: number;
+  parameterMode?: "network" | "node"; // "network" (global sliders) or "node" (per-node properties)
   shocks: Shock[];
   interventions: Intervention[];
 }

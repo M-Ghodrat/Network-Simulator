@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Domain, NodeIndicator, Edge, SavedNetworkConfig } from "../types";
 import { dataService } from "../dataService";
-import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen } from "lucide-react";
+import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { auth } from "../firebase";
 import { generateStaticNetworkSvg } from "../lib/simulationClient";
@@ -69,7 +69,11 @@ export default function ConfigPage() {
   };
 
   // Tabs for sub-sections
-  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges" | "network">("nodes");
+  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges" | "network" | "metrics">("nodes");
+  const [metricDomainFilter, setMetricDomainFilter] = useState("all");
+  const [metricNodeSearch, setMetricNodeSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"id" | "inDegree" | "outDegree" | "betweenness">("id");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [networkScale, setNetworkScale] = useState(80);
 
   // Saved custom configuration states
@@ -140,6 +144,161 @@ export default function ConfigPage() {
       unsubStatus();
     };
   }, []);
+
+  // Centrality metrics calculations
+  const allMetrics = useMemo(() => {
+    const inDegree: Record<string, number> = {};
+    const outDegree: Record<string, number> = {};
+    const betweenness: Record<string, number> = {};
+
+    nodes.forEach((n) => {
+      inDegree[n.id] = 0;
+      outDegree[n.id] = 0;
+      betweenness[n.id] = 0;
+    });
+
+    edges.forEach((e) => {
+      if (outDegree[e.source] !== undefined) outDegree[e.source]++;
+      if (inDegree[e.target] !== undefined) inDegree[e.target]++;
+    });
+
+    // Brandes' Algorithm for unweighted directed graph
+    nodes.forEach((s) => {
+      const S: string[] = []; // Stack
+      const P: Record<string, string[]> = {}; // Predecessors list
+      const sigma: Record<string, number> = {}; // shortest path counts
+      const d: Record<string, number> = {}; // distances
+
+      nodes.forEach((w) => {
+        P[w.id] = [];
+        sigma[w.id] = 0;
+        d[w.id] = -1;
+      });
+
+      if (sigma[s.id] !== undefined) {
+        sigma[s.id] = 1;
+        d[s.id] = 0;
+      }
+
+      const Q: string[] = [s.id]; // Queue
+
+      while (Q.length > 0) {
+        const v = Q.shift()!;
+        S.push(v);
+
+        // Out neighbors of v
+        const neighbors = edges.filter((e) => e.source === v).map((e) => e.target);
+
+        neighbors.forEach((w) => {
+          if (d[w] !== undefined) {
+            if (d[w] < 0) {
+              d[w] = d[v] + 1;
+              Q.push(w);
+            }
+            if (d[w] === d[v] + 1) {
+              sigma[w] += sigma[v];
+              P[w].push(v);
+            }
+          }
+        });
+      }
+
+      const delta: Record<string, number> = {};
+      nodes.forEach((w) => (delta[w.id] = 0));
+
+      while (S.length > 0) {
+        const w = S.pop()!;
+        P[w].forEach((v) => {
+          if (sigma[w] > 0) {
+            const c = (sigma[v] / sigma[w]) * (1 + delta[w]);
+            delta[v] += c;
+          }
+        });
+        if (w !== s.id) {
+          betweenness[w] += delta[w];
+        }
+      }
+    });
+
+    return { inDegree, outDegree, betweenness };
+  }, [nodes, edges]);
+
+  const overallExtremums = useMemo(() => {
+    if (nodes.length === 0) return null;
+
+    const getExtremums = (metric: Record<string, number>) => {
+      const entries = Object.entries(metric);
+      if (entries.length === 0) return { maxNodes: [] as string[], minNodes: [] as string[], maxVal: 0, minVal: 0 };
+      
+      let maxVal = -Infinity;
+      let minVal = Infinity;
+      
+      entries.forEach(([_, val]) => {
+        if (val > maxVal) maxVal = val;
+        if (val < minVal) minVal = val;
+      });
+
+      const maxNodes: string[] = [];
+      const minNodes: string[] = [];
+
+      // Only mark unique extremums if they do not all have identical values
+      if (maxVal !== minVal) {
+        entries.forEach(([id, val]) => {
+          if (val === maxVal) maxNodes.push(id);
+          if (val === minVal) minNodes.push(id);
+        });
+      }
+
+      return { maxNodes, minNodes, maxVal, minVal };
+    };
+
+    return {
+      inDegree: getExtremums(allMetrics.inDegree),
+      outDegree: getExtremums(allMetrics.outDegree),
+      betweenness: getExtremums(allMetrics.betweenness),
+    };
+  }, [nodes, allMetrics]);
+
+  const filteredMetricsList = useMemo(() => {
+    const list = nodes
+      .filter((node) => {
+        const matchesDomain = metricDomainFilter === "all" || node.domain_id === metricDomainFilter;
+        const matchesSearch =
+          metricNodeSearch === "" ||
+          node.id.toLowerCase().includes(metricNodeSearch.toLowerCase()) ||
+          node.full_name.toLowerCase().includes(metricNodeSearch.toLowerCase());
+        return matchesDomain && matchesSearch;
+      })
+      .map((node) => {
+        const dName = domains.find((d) => d.id === node.domain_id)?.name || `Domain ${node.domain_id}`;
+        return {
+          node,
+          domainName: dName,
+          inDegree: allMetrics.inDegree[node.id] || 0,
+          outDegree: allMetrics.outDegree[node.id] || 0,
+          betweenness: allMetrics.betweenness[node.id] || 0,
+        };
+      });
+
+    list.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortBy === "id") {
+        valA = a.node.id;
+        valB = b.node.id;
+      } else {
+        valA = a[sortBy];
+        valB = b[sortBy];
+      }
+
+      if (valA < valB) return sortOrder === "asc" ? -1 : 1;
+      if (valA > valB) return sortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [nodes, allMetrics, metricDomainFilter, metricNodeSearch, domains, sortBy, sortOrder]);
 
   const showFeedback = (text: string, type: "success" | "error") => {
     setMessage({ text, type });
@@ -580,6 +739,20 @@ export default function ConfigPage() {
               Static
             </span>
           </button>
+          <button
+            onClick={() => setActiveTab("metrics")}
+            className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
+              activeTab === "metrics" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <TrendingUp size={12} className="text-slate-400" />
+              <span>Network Metrics</span>
+            </span>
+            <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
+              Live
+            </span>
+          </button>
 
           <div className="pt-4 border-t border-slate-100 px-2 text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
             <Info size={12} className="shrink-0 mt-0.5" />
@@ -742,35 +915,35 @@ export default function ConfigPage() {
                     <div className="p-3 bg-slate-50/50 border border-slate-200 rounded-lg space-y-2">
                       <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
                         <span>Failure Threshold (θ_v)</span>
-                        <span className="font-bold text-slate-800">{nodeForm.theta}</span>
+                        <span className="font-bold text-slate-800">{Number(nodeForm.theta).toFixed(2)}</span>
                       </div>
                       <input
                         type="range"
-                        min="0.05"
-                        max="0.95"
+                        min="0.00"
+                        max="0.40"
                         step="0.01"
-                        value={nodeForm.theta}
+                        value={Math.min(0.40, Math.max(0.00, Number(nodeForm.theta)))}
                         onChange={(e) => setNodeForm({ ...nodeForm, theta: Number(e.target.value) })}
                         className="w-full accent-slate-900"
                       />
-                      <p className="text-[10px] text-slate-400">Incoming degradation above this threshold causes node stability decline.</p>
+                      <p className="text-[10px] text-slate-400">Incoming degradation above this threshold (0.00 – 0.40) causes node stability decline.</p>
                     </div>
 
                     <div className="p-3 bg-slate-50/50 border border-slate-200 rounded-lg space-y-2">
                       <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
                         <span>Passive Recovery Rate (r_v)</span>
-                        <span className="font-bold text-slate-800">{nodeForm.recovery_rate}</span>
+                        <span className="font-bold text-slate-800">{Number(nodeForm.recovery_rate).toFixed(3)}</span>
                       </div>
                       <input
                         type="range"
                         min="0.00"
-                        max="1.00"
+                        max="0.10"
                         step="0.005"
-                        value={nodeForm.recovery_rate}
+                        value={Math.min(0.10, Math.max(0.00, Number(nodeForm.recovery_rate)))}
                         onChange={(e) => setNodeForm({ ...nodeForm, recovery_rate: Number(e.target.value) })}
                         className="w-full accent-slate-900"
                       />
-                      <p className="text-[10px] text-slate-400">Recovery added to stability at each wave.</p>
+                      <p className="text-[10px] text-slate-400">Recovery added to stability at each wave (0.000 – 0.100).</p>
                     </div>
                   </div>
 
@@ -1087,6 +1260,412 @@ export default function ConfigPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {!loading && activeTab === "metrics" && (
+            <div className="space-y-6 animate-fade-in" id="metrics-tab">
+              {/* Introduction & Formula Explanation */}
+              <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                    <TrendingUp size={20} className="text-indigo-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 font-sans">
+                      Network Centrality & Vulnerability Metrics
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Live structural analysis of direct dependencies, immediate influence pathways, and cascade transit bottlenecks.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-100 text-[11px] text-slate-600 leading-relaxed">
+                  <div className="space-y-1 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                      In-Degree Centrality
+                    </span>
+                    <p className="text-slate-500">
+                      Counts incoming connections. High In-Degree means the indicator is directly vulnerable to cascade shocks from multiple other nodes.
+                    </p>
+                    <div className="font-mono text-[10px] text-slate-400 mt-1">
+                      Formula: C_D,in(v) = deg_in(v)
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                      Out-Degree Centrality
+                    </span>
+                    <p className="text-slate-500">
+                      Counts outgoing connections. High Out-Degree means shocks hitting this indicator propagate rapidly, directly impacting many child nodes.
+                    </p>
+                    <div className="font-mono text-[10px] text-slate-400 mt-1">
+                      Formula: C_D,out(v) = deg_out(v)
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      Betweenness Centrality
+                    </span>
+                    <p className="text-slate-500">
+                      Measures the fraction of shortest paths passing through a node. High Betweenness nodes act as key transition hubs or bottleneck pathways.
+                    </p>
+                    <div className="font-mono text-[10px] text-slate-400 mt-1">
+                      Formula: C_B(v) = ∑ (σ_st(v) / σ_st)
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Extremums Bento Layout */}
+              {nodes.length > 0 && overallExtremums && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6" id="metrics-extremums">
+                  {/* In-Degree card */}
+                  <div className="bg-white p-4 border border-slate-200 rounded-xl flex flex-col justify-between space-y-4 shadow-2xs">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-semibold animate-pulse">In-Degree Overview</div>
+                      <h4 className="text-xs font-bold text-slate-700">Immediate Dependencies</h4>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-1">
+                      <div className="bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-emerald-800 block uppercase tracking-wider font-mono">🏆 Max In-Degree</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.inDegree.maxVal}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.inDegree.maxNodes.join(", ")}>
+                          {overallExtremums.inDegree.maxNodes.length > 0 ? overallExtremums.inDegree.maxNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                      <div className="bg-rose-50/50 border border-rose-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-rose-800 block uppercase tracking-wider font-mono">🔽 Min In-Degree</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.inDegree.minVal}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.inDegree.minNodes.join(", ")}>
+                          {overallExtremums.inDegree.minNodes.length > 0 ? overallExtremums.inDegree.minNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Out-Degree card */}
+                  <div className="bg-white p-4 border border-slate-200 rounded-xl flex flex-col justify-between space-y-4 shadow-2xs">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-semibold animate-pulse">Out-Degree Overview</div>
+                      <h4 className="text-xs font-bold text-slate-700">Immediate Influence</h4>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-1">
+                      <div className="bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-emerald-800 block uppercase tracking-wider font-mono">🏆 Max Out-Degree</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.outDegree.maxVal}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.outDegree.maxNodes.join(", ")}>
+                          {overallExtremums.outDegree.maxNodes.length > 0 ? overallExtremums.outDegree.maxNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                      <div className="bg-rose-50/50 border border-rose-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-rose-800 block uppercase tracking-wider font-mono">🔽 Min Out-Degree</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.outDegree.minVal}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.outDegree.minNodes.join(", ")}>
+                          {overallExtremums.outDegree.minNodes.length > 0 ? overallExtremums.outDegree.minNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Betweenness card */}
+                  <div className="bg-white p-4 border border-slate-200 rounded-xl flex flex-col justify-between space-y-4 shadow-2xs">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-semibold animate-pulse">Betweenness Overview</div>
+                      <h4 className="text-xs font-bold text-slate-700">Shortest Path Hubs</h4>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-1">
+                      <div className="bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-emerald-800 block uppercase tracking-wider font-mono">🏆 Max Betweenness</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.betweenness.maxVal.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.betweenness.maxNodes.join(", ")}>
+                          {overallExtremums.betweenness.maxNodes.length > 0 ? overallExtremums.betweenness.maxNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                      <div className="bg-rose-50/50 border border-rose-100 p-2.5 rounded-lg space-y-1">
+                        <span className="text-[9px] font-bold text-rose-800 block uppercase tracking-wider font-mono">🔽 Min Betweenness</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {overallExtremums.betweenness.minVal.toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-medium truncate" title={overallExtremums.betweenness.minNodes.join(", ")}>
+                          {overallExtremums.betweenness.minNodes.length > 0 ? overallExtremums.betweenness.minNodes.join(", ") : "None"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Filters Panel */}
+              <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <Award size={18} className="text-slate-400" />
+                    <h3 className="text-xs font-bold text-slate-800">Filter & Analyze Indicators</h3>
+                  </div>
+
+                  {/* Reset Filters when active */}
+                  {(metricDomainFilter !== "all" || metricNodeSearch !== "") && (
+                    <button
+                      onClick={() => {
+                        setMetricDomainFilter("all");
+                        setMetricNodeSearch("");
+                      }}
+                      className="text-indigo-600 hover:text-indigo-800 font-semibold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <RefreshCw size={12} className="animate-spin-slow" />
+                      Reset Active Filters
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Domain Filter */}
+                  <div className="space-y-1">
+                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Filter by Domain</label>
+                    <select
+                      value={metricDomainFilter}
+                      onChange={(e) => setMetricDomainFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none font-medium text-slate-700"
+                    >
+                      <option value="all">All Domains (Entire Network)</option>
+                      {domains.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          Domain {d.id} — {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Search input */}
+                  <div className="space-y-1">
+                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Search Node ID or Name</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="e.g. BI, Public Finance..."
+                        value={metricNodeSearch}
+                        onChange={(e) => setMetricNodeSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none font-medium"
+                      />
+                      <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table / Grid */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold">
+                    Indicator Centrality Metrics ({filteredMetricsList.length} shown)
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400">
+                    Click column headers to sort. Double click to toggle direction.
+                  </span>
+                </div>
+
+                {filteredMetricsList.length === 0 ? (
+                  <div className="p-12 text-center space-y-2">
+                    <TrendingUp size={28} className="text-slate-300 mx-auto stroke-1 animate-pulse" />
+                    <h4 className="text-xs font-bold text-slate-600">No matching indicators found</h4>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto leading-relaxed">
+                      Try resetting your filters or adjusting your search term.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="bg-slate-50 font-semibold text-slate-600 border-b border-slate-100 font-mono text-[9px] uppercase tracking-wider select-none">
+                        <tr>
+                          {/* Node sorting header */}
+                          <th
+                            onClick={() => {
+                              if (sortBy === "id") {
+                                setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                              } else {
+                                setSortBy("id");
+                                setSortOrder("asc");
+                              }
+                            }}
+                            className="p-3 pl-4 cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                            <span className="flex items-center gap-1.5 whitespace-nowrap">
+                              Indicator {sortBy === "id" && (sortOrder === "asc" ? "▲" : "▼")}
+                            </span>
+                          </th>
+
+                          {/* Domain header */}
+                          <th className="p-3">Domain</th>
+
+                          {/* In-Degree header */}
+                          <th
+                            onClick={() => {
+                              if (sortBy === "inDegree") {
+                                setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                              } else {
+                                setSortBy("inDegree");
+                                setSortOrder("desc");
+                              }
+                            }}
+                            className="p-3 cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                            <span className="flex items-center gap-1.5 whitespace-nowrap">
+                              In-Degree Centrality {sortBy === "inDegree" && (sortOrder === "asc" ? "▲" : "▼")}
+                            </span>
+                          </th>
+
+                          {/* Out-Degree header */}
+                          <th
+                            onClick={() => {
+                              if (sortBy === "outDegree") {
+                                setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                              } else {
+                                setSortBy("outDegree");
+                                setSortOrder("desc");
+                              }
+                            }}
+                            className="p-3 cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                            <span className="flex items-center gap-1.5 whitespace-nowrap">
+                              Out-Degree Centrality {sortBy === "outDegree" && (sortOrder === "asc" ? "▲" : "▼")}
+                            </span>
+                          </th>
+
+                          {/* Betweenness header */}
+                          <th
+                            onClick={() => {
+                              if (sortBy === "betweenness") {
+                                setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                              } else {
+                                setSortBy("betweenness");
+                                setSortOrder("desc");
+                              }
+                            }}
+                            className="p-3 pr-4 cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                            <span className="flex items-center gap-1.5 whitespace-nowrap">
+                              Betweenness Centrality {sortBy === "betweenness" && (sortOrder === "asc" ? "▲" : "▼")}
+                            </span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {filteredMetricsList.map(({ node, domainName, inDegree, outDegree, betweenness }) => {
+                          const isGlobalMaxIn = overallExtremums?.inDegree.maxNodes.includes(node.id);
+                          const isGlobalMinIn = overallExtremums?.inDegree.minNodes.includes(node.id);
+
+                          const isGlobalMaxOut = overallExtremums?.outDegree.maxNodes.includes(node.id);
+                          const isGlobalMinOut = overallExtremums?.outDegree.minNodes.includes(node.id);
+
+                          const isGlobalMaxBtw = overallExtremums?.betweenness.maxNodes.includes(node.id);
+                          const isGlobalMinBtw = overallExtremums?.betweenness.minNodes.includes(node.id);
+
+                          const maxIn = overallExtremums?.inDegree.maxVal || 1;
+                          const maxOut = overallExtremums?.outDegree.maxVal || 1;
+                          const maxBtw = overallExtremums?.betweenness.maxVal || 1;
+
+                          return (
+                            <tr key={node.id} className="hover:bg-slate-50/40 transition-colors">
+                              {/* ID & Name */}
+                              <td className="p-3 pl-4">
+                                <div className="font-mono font-bold text-slate-800 text-[13px]">{node.id}</div>
+                                <div className="text-[10px] text-slate-400 font-sans line-clamp-1">{node.full_name}</div>
+                              </td>
+
+                              {/* Domain Badge */}
+                              <td className="p-3">
+                                <div className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 max-w-[140px] truncate" title={domainName}>
+                                  D{node.domain_id} — {domainName}
+                                </div>
+                              </td>
+
+                              {/* In-Degree Centrality */}
+                              <td className="p-3">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-slate-900 text-xs">{inDegree}</span>
+                                    {isGlobalMaxIn && (
+                                      <span className="inline-block text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap">🏆 Max</span>
+                                    )}
+                                    {isGlobalMinIn && (
+                                      <span className="inline-block text-[8px] bg-rose-100 text-rose-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap">🔽 Min</span>
+                                    )}
+                                  </div>
+                                  <div className="w-24 bg-slate-100 rounded-full h-1 relative overflow-hidden hidden sm:block">
+                                    <div
+                                      className={`h-full rounded-full ${isGlobalMaxIn ? "bg-emerald-500" : isGlobalMinIn ? "bg-rose-400" : "bg-indigo-600"}`}
+                                      style={{ width: `${maxIn > 0 ? (inDegree / maxIn) * 100 : 0}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Out-Degree Centrality */}
+                              <td className="p-3">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-slate-900 text-xs">{outDegree}</span>
+                                    {isGlobalMaxOut && (
+                                      <span className="inline-block text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap">🏆 Max</span>
+                                    )}
+                                    {isGlobalMinOut && (
+                                      <span className="inline-block text-[8px] bg-rose-100 text-rose-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap font-semibold">🔽 Min</span>
+                                    )}
+                                  </div>
+                                  <div className="w-24 bg-slate-100 rounded-full h-1 relative overflow-hidden hidden sm:block">
+                                    <div
+                                      className={`h-full rounded-full ${isGlobalMaxOut ? "bg-emerald-500" : isGlobalMinOut ? "bg-rose-400" : "bg-indigo-600"}`}
+                                      style={{ width: `${maxOut > 0 ? (outDegree / maxOut) * 100 : 0}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Betweenness Centrality */}
+                              <td className="p-3 pr-4">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-slate-900 text-xs">{betweenness.toFixed(2)}</span>
+                                    {isGlobalMaxBtw && (
+                                      <span className="inline-block text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap">🏆 Max</span>
+                                    )}
+                                    {isGlobalMinBtw && (
+                                      <span className="inline-block text-[8px] bg-rose-100 text-rose-800 px-1 py-0.5 rounded font-sans font-bold whitespace-nowrap font-semibold">🔽 Min</span>
+                                    )}
+                                  </div>
+                                  <div className="w-24 bg-slate-100 rounded-full h-1 relative overflow-hidden hidden sm:block">
+                                    <div
+                                      className={`h-full rounded-full ${isGlobalMaxBtw ? "bg-emerald-500" : isGlobalMinBtw ? "bg-rose-400" : "bg-indigo-600"}`}
+                                      style={{ width: `${maxBtw > 0 ? (betweenness / maxBtw) * 100 : 0}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}

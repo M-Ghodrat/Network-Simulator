@@ -36,6 +36,7 @@ export interface SimulationParams {
   epsilon?: number;
   default_theta?: number;
   default_recovery_rate?: number;
+  parameter_mode?: "network" | "node";
   interventions?: any[];
 }
 
@@ -346,15 +347,38 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
     .filter(e => nodes_list.includes(e.source) && nodes_list.includes(e.target))
     .map(e => [e.source, e.target]);
 
+  const parameter_mode = params.parameter_mode || "network";
   const thresholds: Record<string, number> = {};
   const recovery_rates: Record<string, number> = {};
   const nodes_domain: Record<string, string> = {};
 
-  nodes.forEach(node => {
-    thresholds[node.abbr] = typeof node.theta === "number" ? node.theta : default_theta;
-    recovery_rates[node.abbr] = typeof node.recovery_rate === "number" ? node.recovery_rate : default_recovery_rate;
-    nodes_domain[node.abbr] = String(node.domain_id);
-  });
+  if (parameter_mode === "node") {
+    const missingNodes: string[] = [];
+    nodes.forEach(node => {
+      const hasTheta = typeof node.theta === "number" && !isNaN(node.theta);
+      const hasRecovery = typeof node.recovery_rate === "number" && !isNaN(node.recovery_rate);
+      if (!hasTheta || !hasRecovery) {
+        missingNodes.push(node.abbr);
+      } else {
+        thresholds[node.abbr] = node.theta;
+        recovery_rates[node.abbr] = node.recovery_rate;
+      }
+      nodes_domain[node.abbr] = String(node.domain_id);
+    });
+
+    if (missingNodes.length > 0) {
+      throw new Error(
+        `Node-level parameters are missing for indicator(s): ${missingNodes.slice(0, 5).join(", ")}${missingNodes.length > 5 ? ` and ${missingNodes.length - 5} more` : ""}. Please configure Failure Threshold (θ) and Passive Recovery (rv) in the Network Configuration tab for all nodes, or choose Network-Level (Global) parameters.`
+      );
+    }
+  } else {
+    // Network-level: all nodes use the global defaults
+    nodes.forEach(node => {
+      thresholds[node.abbr] = default_theta;
+      recovery_rates[node.abbr] = default_recovery_rate;
+      nodes_domain[node.abbr] = String(node.domain_id);
+    });
+  }
 
   const shocks: Record<string, number> = {};
   for (const [abbr, delta] of Object.entries(shocks_raw)) {

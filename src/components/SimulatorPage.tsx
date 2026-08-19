@@ -1,8 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult } from "../types";
 import { dataService } from "../dataService";
 import { runSimulationClient, SimulationPayload } from "../lib/simulationClient";
-import { Play, Pause, RefreshCw, Download, Plus, Trash2, Sliders, BarChart4, Network, HelpCircle, AlertTriangle } from "lucide-react";
+import { 
+  Play, 
+  Pause, 
+  RefreshCw, 
+  Download, 
+  Trash2, 
+  Sliders, 
+  BarChart4, 
+  Network, 
+  AlertTriangle,
+  Zap
+} from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
   ResponsiveContainer,
@@ -12,7 +23,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   BarChart,
   Bar,
   Cell
@@ -48,10 +58,11 @@ export default function SimulatorPage() {
 
   // Simulation parameters states
   const [T, setT] = useState(10);
-  const [theta, setTheta] = useState(0.2);
+  const [theta, setTheta] = useState(0.20); // Failure threshold: 0 - 0.4
   const [gamma, setGamma] = useState(1.5);
   const [epsilon, setEpsilon] = useState(0.001);
-  const [rv, setRv] = useState(0.05);
+  const [rv, setRv] = useState(0.050); // Passive recovery: 0 - 0.1
+  const [parameterMode, setParameterMode] = useState<"network" | "node">("network");
 
   // Shocks list
   const [shocks, setShocks] = useState<Shock[]>([]);
@@ -69,6 +80,9 @@ export default function SimulatorPage() {
   const [simulating, setSimulating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Last run configuration snapshot for change detection
+  const [lastRunSignature, setLastRunSignature] = useState<string>("");
+
   // Visualization playing state
   const [selectedWave, setSelectedWave] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -76,11 +90,30 @@ export default function SimulatorPage() {
 
   // Dashboard charting selections
   const [selectedChartNodes, setSelectedChartNodes] = useState<string[]>([]);
-  const [newChartNode, setNewChartNode] = useState("");
   
   // Results table filter
   const [tableSearch, setTableSearch] = useState("");
   const [imageScale, setImageScale] = useState(80);
+
+  // Current parameter signature to detect when user modifies parameters
+  const currentSignature = useMemo(() => {
+    return JSON.stringify({
+      T,
+      theta: Number(theta.toFixed(4)),
+      gamma: Number(gamma.toFixed(2)),
+      epsilon: Number(epsilon.toFixed(5)),
+      rv: Number(rv.toFixed(4)),
+      parameterMode,
+      shocks: [...shocks].sort((a, b) => a.node.localeCompare(b.node)),
+      interventions: [...interventions].sort((a, b) => a.node.localeCompare(b.node) || a.wave - b.wave),
+      nodeCount: nodes.length,
+      edgeCount: edges.length
+    });
+  }, [T, theta, gamma, epsilon, rv, parameterMode, shocks, interventions, nodes.length, edges.length]);
+
+  const hasUnrunChanges = useMemo(() => {
+    return simResult !== null && lastRunSignature !== "" && lastRunSignature !== currentSignature;
+  }, [simResult, lastRunSignature, currentSignature]);
 
   // Load configuration from dataService
   useEffect(() => {
@@ -96,7 +129,6 @@ export default function SimulatorPage() {
         const defaultNode = list.find(n => n.abbr === "PF")?.abbr || list.find(n => n.abbr === "N2")?.abbr || list[0].abbr;
         setNewShockNode((prev) => prev || defaultNode);
         setNewIntervNode((prev) => prev || defaultNode);
-        setNewChartNode((prev) => prev || list[0].abbr);
       }
     });
 
@@ -108,10 +140,13 @@ export default function SimulatorPage() {
     const unsubParams = dataService.subscribeParams((p) => {
       if (p) {
         setT(p.T ?? 10);
-        setTheta(p.theta ?? 0.2);
+        // Clamp failure threshold to 0 - 0.4
+        setTheta(p.theta !== undefined ? Math.min(0.40, Math.max(0.00, p.theta)) : 0.20);
         setGamma(p.gamma ?? 1.5);
         setEpsilon(p.epsilon ?? 0.001);
-        setRv(p.rv ?? 0.05);
+        // Clamp passive recovery to 0 - 0.1
+        setRv(p.rv !== undefined ? Math.min(0.10, Math.max(0.00, p.rv)) : 0.050);
+        if (p.parameterMode) setParameterMode(p.parameterMode);
         if (p.shocks) setShocks(p.shocks);
         if (p.interventions) setInterventions(p.interventions);
       }
@@ -156,7 +191,7 @@ export default function SimulatorPage() {
     };
   }, [isPlaying, simResult]);
 
-  // Add default demo shock scenario on load
+  // Add default demo shock scenario on load if empty
   useEffect(() => {
     if (nodes.length > 0 && shocks.length === 0) {
       const defaultShocks: Shock[] = [];
@@ -186,6 +221,18 @@ export default function SimulatorPage() {
       }
     }
   }, [nodes]);
+
+  // Keyboard shortcut: Cmd/Ctrl + Enter to trigger simulation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        runSimulation();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   // CRUD for shocks
   const addShock = () => {
@@ -217,6 +264,12 @@ export default function SimulatorPage() {
     setInterventions(interventions.filter((_, i) => i !== index));
   };
 
+  const missingNodeCount = useMemo(() => {
+    return nodes.filter(
+      n => typeof n.theta !== "number" || isNaN(n.theta) || typeof n.recovery_rate !== "number" || isNaN(n.recovery_rate)
+    ).length;
+  }, [nodes]);
+
   const saveCurrentParams = async () => {
     try {
       await dataService.saveParams({
@@ -226,6 +279,7 @@ export default function SimulatorPage() {
         gamma,
         epsilon,
         rv,
+        parameterMode,
         shocks,
         interventions
       });
@@ -234,11 +288,43 @@ export default function SimulatorPage() {
     }
   };
 
-  // Run Simulation API call
+  // Run Simulation execution
   const runSimulation = async () => {
     if (nodes.length === 0) {
-      alert("No nodes loaded. Please seed the network in Network Configuration first!");
+      setModal({
+        isOpen: true,
+        title: "No Indicators Found",
+        message: "No indicator nodes were loaded. Please load or seed your network in the Network Configuration tab first.",
+        type: "danger",
+        showCancel: false,
+        onConfirm: closeModal
+      });
       return;
+    }
+
+    // Node-level validation check
+    if (parameterMode === "node") {
+      const missingNodes = nodes.filter(
+        n => typeof n.theta !== "number" || isNaN(n.theta) || typeof n.recovery_rate !== "number" || isNaN(n.recovery_rate)
+      );
+      if (missingNodes.length > 0) {
+        const missingAbbrs = missingNodes.map(n => n.abbr).slice(0, 6).join(", ");
+        const extraCount = missingNodes.length > 6 ? ` and ${missingNodes.length - 6} more` : "";
+        setModal({
+          isOpen: true,
+          title: "Node-Level Parameters Missing",
+          message: `The following indicator(s) are missing Failure Threshold (θ) or Passive Recovery (rv): ${missingAbbrs}${extraCount}. Please switch to "Network-Level" parameters or set individual values for all nodes in the Network Configuration tab.`,
+          confirmText: "Switch to Network-Level",
+          cancelText: "Cancel",
+          showCancel: true,
+          type: "danger",
+          onConfirm: () => {
+            setParameterMode("network");
+            closeModal();
+          }
+        });
+        return;
+      }
     }
 
     setSimulating(true);
@@ -246,15 +332,14 @@ export default function SimulatorPage() {
     setIsPlaying(false);
     setSelectedWave(0);
 
-    // Save current parameters to Firestore
+    // Save current parameters to Firestore/Local
     await saveCurrentParams();
 
-    // Prepare python payload
+    // Prepare payload
     const payloadShocks: Record<string, number> = {};
     shocks.forEach((s) => {
       payloadShocks[s.node] = s.intensity;
     });
-
 
     const payload: SimulationPayload = {
       nodes,
@@ -267,17 +352,19 @@ export default function SimulatorPage() {
         epsilon,
         default_theta: theta,
         default_recovery_rate: rv,
+        parameter_mode: parameterMode,
         interventions
       }
     };
 
     try {
-      // Run the simulation entirely in the browser
       const result = runSimulationClient(payload);
       setSimResult(result);
+      // Mark current configuration as active
+      setLastRunSignature(currentSignature);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err?.message || "An unexpected error occurred during client-side simulation.");
+      setErrorMsg(err?.message || "An unexpected error occurred during simulation calculation.");
     } finally {
       setSimulating(false);
     }
@@ -337,7 +424,6 @@ export default function SimulatorPage() {
         const sVal = simResult.history[node.abbr]?.[t];
         const sValStr = sVal !== undefined ? sVal.toFixed(4) : "1.0000";
         const dName = domains.find(d => d.id === node.domain_id)?.name || node.domain_id;
-        // Escape quotes
         const nameEscaped = node.full_name.replace(/"/g, '""');
         const domainEscaped = dName.replace(/"/g, '""');
         csvContent += `${t},${node.abbr},"${nameEscaped}","${domainEscaped}",${sValStr}\n`;
@@ -365,33 +451,72 @@ export default function SimulatorPage() {
     document.body.removeChild(link);
   };
 
-  // Domain color mapping helper for text/badges
-  const getDomainColor = (id: string) => {
-    const map: Record<string, string> = {
-      "1": "bg-blue-50 text-blue-700 border-blue-100",
-      "2": "bg-emerald-50 text-emerald-700 border-emerald-100",
-      "3": "bg-green-50 text-green-700 border-green-100",
-      "4": "bg-pink-50 text-pink-700 border-pink-100",
-      "5": "bg-violet-50 text-violet-700 border-violet-100",
-      "6": "bg-amber-50 text-amber-700 border-amber-100",
-      "7": "bg-orange-50 text-orange-700 border-orange-100"
-    };
-    return map[id] || "bg-slate-100 text-slate-700 border-slate-200";
-  };
-
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-2" id="simulator-page">
+    <div className="space-y-4 py-2 animate-fade-in" id="simulator-page">
       
-      {/* 1. LEFT PANEL - SIMULATION CONTROLS */}
-      <div className="lg:col-span-3 bg-white p-4 border border-slate-200 rounded-xl shadow-xs space-y-5 flex flex-col justify-between" id="left-controls">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-            <Sliders size={16} className="text-slate-500" />
-            <h2 className="text-sm font-bold text-slate-900 font-sans">Simulation Controls</h2>
+      {/* TOP HEADER */}
+      <div className="bg-white p-3.5 border border-slate-200 rounded-xl shadow-xs flex items-center justify-between gap-3" id="simulator-header-bar">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-50 text-indigo-700 rounded-lg shrink-0">
+            <Zap size={18} />
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-slate-900 font-sans">Stress Cascade Simulator</h1>
+            <p className="text-xs text-slate-500">Model non-linear cascading failures, shock propagation, and planned resilience interventions.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* MAIN LAYOUT GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        {/* 1. LEFT PANEL - SIMULATION CONTROLS */}
+        <div 
+          className={`lg:col-span-3 p-4 rounded-xl shadow-xs space-y-4 transition-all duration-300 ${
+            hasUnrunChanges 
+              ? "bg-amber-950/[0.02] border-2 border-orange-500 ring-1 ring-orange-400/20 shadow-sm" 
+              : "bg-white border border-slate-200"
+          }`} 
+          id="left-controls"
+        >
+          
+          {/* Header */}
+          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Sliders size={16} className="text-slate-500" />
+              <h2 className="text-sm font-bold text-slate-900 font-sans">
+                Simulation Controls
+              </h2>
+            </div>
           </div>
 
+          {/* THE ONLY RUN BUTTON - LOCATED DIRECTLY ABOVE SHOCK DROPDOWN */}
+          <button
+            onClick={runSimulation}
+            disabled={simulating || loadingNodes}
+            className={`w-full py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+              hasUnrunChanges 
+                ? "bg-orange-500 hover:bg-orange-600 text-white" 
+                : "bg-slate-900 hover:bg-slate-800 text-white"
+            } disabled:opacity-60`}
+            id="run-sim-btn"
+            title="Run Cascade Simulation (Shortcut: Cmd/Ctrl + Enter)"
+          >
+            {simulating ? (
+              <>
+                <RefreshCw size={13} className="animate-spin" />
+                <span>Computing Cascade...</span>
+              </>
+            ) : (
+              <>
+                <Play size={12} fill="white" />
+                <span>Run Cascade Simulation</span>
+              </>
+            )}
+          </button>
+
           {/* Seed Shocks (Acutes) */}
-          <div className="space-y-2">
+          <div className="space-y-2 pt-2 border-t border-slate-100">
             <label className="text-[10px] font-mono uppercase tracking-wider text-slate-500 block">
               1. Seed Acute Shocks (t = 0)
             </label>
@@ -425,20 +550,21 @@ export default function SimulatorPage() {
                 step="0.05"
                 value={newShockIntensity}
                 onChange={(e) => setNewShockIntensity(Number(e.target.value))}
-                className="w-24 accent-slate-900"
+                className="w-24 accent-slate-900 cursor-pointer"
               />
-              <span className="font-mono font-bold text-slate-800">{(newShockIntensity * 100).toFixed(0)}%</span>
+              <span className="font-mono font-bold text-slate-800">
+                {(newShockIntensity * 100).toFixed(0)}%
+              </span>
             </div>
 
             {/* Shocks list */}
             {shocks.length > 0 && (
-              <div className="space-y-1.5 pt-1.5 max-h-24 overflow-y-auto pr-1" id="shocks-list">
+              <div className="space-y-1.5 pt-1.5 max-h-28 overflow-y-auto pr-1" id="shocks-list">
                 {shocks.map((s) => {
-                  const nodeObj = nodes.find(n => n.abbr === s.node);
                   return (
                     <div key={s.node} className="flex items-center justify-between text-xs p-1.5 bg-rose-50/50 border border-rose-100 rounded-md font-mono">
                       <span className="font-bold text-rose-900">{s.node} (-{(s.intensity*100).toFixed(0)}%)</span>
-                      <button onClick={() => removeShock(s.node)} className="text-rose-400 hover:text-rose-700">
+                      <button onClick={() => removeShock(s.node)} className="text-rose-400 hover:text-rose-700" title="Remove shock">
                         <Trash2 size={11} />
                       </button>
                     </div>
@@ -454,7 +580,7 @@ export default function SimulatorPage() {
               2. System Parameters
             </span>
 
-            {/* Waves T */}
+            {/* 1. Waves T */}
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-slate-600">
                 <span>Simulation Waves (T):</span>
@@ -467,28 +593,11 @@ export default function SimulatorPage() {
                 step="1"
                 value={T}
                 onChange={(e) => setT(Number(e.target.value))}
-                className="w-full accent-slate-900"
+                className="w-full accent-slate-900 cursor-pointer"
               />
             </div>
 
-            {/* Threshold (theta) */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[11px] text-slate-600">
-                <span>Failure Threshold (θ):</span>
-                <span className="font-mono font-bold">{theta}</span>
-              </div>
-              <input
-                type="range"
-                min="0.05"
-                max="0.95"
-                step="0.01"
-                value={theta}
-                onChange={(e) => setTheta(Number(e.target.value))}
-                className="w-full accent-slate-900"
-              />
-            </div>
-
-            {/* Exponent (gamma) */}
+            {/* 2. Exponent (gamma) - Centrality Dampening */}
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-slate-600">
                 <span>Centrality Dampening (γ):</span>
@@ -501,25 +610,115 @@ export default function SimulatorPage() {
                 step="0.1"
                 value={gamma}
                 onChange={(e) => setGamma(Number(e.target.value))}
-                className="w-full accent-slate-900"
+                className="w-full accent-slate-900 cursor-pointer"
               />
             </div>
 
-            {/* Passive Recovery (rv) */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[11px] text-slate-600">
-                <span>Passive Recovery (r_v):</span>
-                <span className="font-mono font-bold">{rv}</span>
+            {/* 3. Parameter Level Mode: Network vs Node */}
+            <div className="space-y-1.5 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-semibold text-slate-800">Parameter Scope (θ & r_v):</span>
+                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-200 font-bold">
+                  {parameterMode === "network" ? "Global" : "Per-Node"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-200/80 rounded-md">
+                <button
+                  type="button"
+                  onClick={() => setParameterMode("network")}
+                  className={`py-1 text-[11px] font-medium rounded transition-all text-center ${
+                    parameterMode === "network"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Network-Level
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setParameterMode("node")}
+                  className={`py-1 text-[11px] font-medium rounded transition-all text-center ${
+                    parameterMode === "node"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Node-Level
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                {parameterMode === "network"
+                  ? "Sliders below apply globally across all indicators in the network."
+                  : "Uses individual parameters defined per node in Network Configuration tab."}
+              </p>
+              {parameterMode === "node" && missingNodeCount > 0 && (
+                <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-1.5 mt-1 leading-tight flex items-start gap-1">
+                  <span>⚠️</span>
+                  <span>
+                    <strong>{missingNodeCount} node(s)</strong> are missing individual parameters. Set them in Network Configuration tab or choose Network-Level.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* 4. Threshold (theta) - constrained between 0 - 0.4 */}
+            <div className={`space-y-1 p-2 rounded-lg border transition-all ${
+              parameterMode === "node"
+                ? "bg-slate-100/60 border-slate-200 opacity-60"
+                : "bg-slate-50/70 border-slate-100"
+            }`}>
+              <div className="flex justify-between items-center text-[11px] text-slate-700 font-medium">
+                <span>Failure Threshold (θ):</span>
+                {parameterMode === "network" ? (
+                  <span className="font-mono font-bold text-indigo-700">{theta.toFixed(2)}</span>
+                ) : (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">Per-Node Defined</span>
+                )}
               </div>
               <input
                 type="range"
                 min="0.00"
-                max="1.00"
-                step="0.005"
-                value={rv}
-                onChange={(e) => setRv(Number(e.target.value))}
-                className="w-full accent-slate-900"
+                max="0.40"
+                step="0.01"
+                disabled={parameterMode === "node"}
+                value={Math.min(0.40, Math.max(0.00, theta))}
+                onChange={(e) => setTheta(Number(e.target.value))}
+                className={`w-full accent-indigo-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
               />
+              <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                <span>0.00 (Fragile)</span>
+                <span>0.40 (Resilient)</span>
+              </div>
+            </div>
+
+            {/* 5. Passive Recovery (rv) - constrained between 0 - 0.1 */}
+            <div className={`space-y-1 p-2 rounded-lg border transition-all ${
+              parameterMode === "node"
+                ? "bg-slate-100/60 border-slate-200 opacity-60"
+                : "bg-slate-50/70 border-slate-100"
+            }`}>
+              <div className="flex justify-between items-center text-[11px] text-slate-700 font-medium">
+                <span>Passive Recovery (r_v):</span>
+                {parameterMode === "network" ? (
+                  <span className="font-mono font-bold text-emerald-700">{rv.toFixed(3)}</span>
+                ) : (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">Per-Node Defined</span>
+                )}
+              </div>
+              <input
+                type="range"
+                min="0.000"
+                max="0.100"
+                step="0.005"
+                disabled={parameterMode === "node"}
+                value={Math.min(0.100, Math.max(0.000, rv))}
+                onChange={(e) => setRv(Number(e.target.value))}
+                className={`w-full accent-emerald-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
+              />
+              <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                <span>0.000 (No Recovery)</span>
+                <span>0.100 (Max Natural)</span>
+              </div>
             </div>
 
             {/* Advanced: Convergence tolerance epsilon */}
@@ -530,7 +729,7 @@ export default function SimulatorPage() {
                 step="0.0001"
                 value={epsilon}
                 onChange={(e) => setEpsilon(Number(e.target.value))}
-                className="w-20 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-md font-mono font-bold text-right"
+                className="w-20 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-md font-mono font-bold text-right text-xs"
               />
             </div>
           </div>
@@ -580,7 +779,7 @@ export default function SimulatorPage() {
                 step="0.002"
                 value={newIntervStrength}
                 onChange={(e) => setNewIntervStrength(Number(e.target.value))}
-                className="w-24 accent-slate-900"
+                className="w-24 accent-slate-900 cursor-pointer"
               />
               <span className="font-mono font-bold text-indigo-700">+{newIntervStrength.toFixed(3)}</span>
             </div>
@@ -591,7 +790,7 @@ export default function SimulatorPage() {
                 {interventions.map((item, index) => (
                   <div key={index} className="flex items-center justify-between text-[11px] p-1.5 bg-indigo-50/50 border border-indigo-100 rounded-md font-mono">
                     <span className="text-indigo-900 font-semibold">{item.node} @ Wave {item.wave} (+{item.strength})</span>
-                    <button onClick={() => removeIntervention(index)} className="text-indigo-400 hover:text-indigo-700">
+                    <button onClick={() => removeIntervention(index)} className="text-indigo-400 hover:text-indigo-700" title="Remove intervention">
                       <Trash2 size={11} />
                     </button>
                   </div>
@@ -599,390 +798,377 @@ export default function SimulatorPage() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Action button */}
-        <div className="pt-4 border-t border-slate-100 space-y-2">
-          {errorMsg && (
-            <div className="p-2 bg-rose-50 border border-rose-100 rounded-lg text-[10px] text-rose-700 leading-relaxed" id="sim-error-alert">
-              <AlertTriangle size={12} className="inline mr-1" />
-              {errorMsg}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={runSimulation}
-              disabled={simulating || loadingNodes}
-              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
-              id="run-sim-btn"
-            >
-              {simulating ? (
-                <>
-                  <RefreshCw size={14} className="animate-spin" />
-                  Computing Cascade...
-                </>
-              ) : (
-                <>
-                  <Play size={12} fill="white" />
-                  Run Cascade Simulation
-                </>
-              )}
-            </button>
+          {/* Bottom Save Parameters */}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            {errorMsg && (
+              <div className="p-2 bg-rose-50 border border-rose-100 rounded-lg text-[10px] text-rose-700 leading-relaxed" id="sim-error-alert">
+                <AlertTriangle size={12} className="inline mr-1" />
+                {errorMsg}
+              </div>
+            )}
             <button
               onClick={async () => {
                 await saveCurrentParams();
                 setModal({
                   isOpen: true,
                   title: "Parameters Saved",
-                  message: "Your simulator parameter configuration has been successfully synchronized and saved to Cloud Firestore!",
-                  confirmText: "Awesome",
+                  message: "Your simulator parameter configuration has been successfully saved to Cloud Firestore!",
+                  confirmText: "Great",
                   type: "success",
                   showCancel: false,
                   onConfirm: closeModal
                 });
               }}
-              className="px-3 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1"
-              title="Save current parameter configuration to Cloud Database"
+              className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              title="Save parameter configuration"
               id="save-params-btn"
             >
-              Save
+              Save Parameters
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* RIGHT SIDE - VISUALIZATION & DASHBOARD */}
-      <div className="lg:col-span-9 flex flex-col gap-6">
-        {/* 2. MIDDLE PANEL - NETWORK VISUALIZATION */}
-        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-xs space-y-4 flex flex-col justify-between" id="middle-visualization">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <Network size={16} className="text-slate-500" />
-            <h2 className="text-sm font-bold text-slate-900 font-sans">Network Propagation Cascade Map</h2>
-          </div>
-          {simResult && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
-                <span className="font-semibold tracking-wider uppercase">Zoom</span>
-                <input
-                  type="range"
-                  min="50"
-                  max="100"
-                  step="10"
-                  value={imageScale}
-                  onChange={(e) => setImageScale(Number(e.target.value))}
-                  className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-                <span className="w-8 text-right">{imageScale}%</span>
-              </div>
-              <button
-                onClick={downloadPNG}
-                className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900"
-                title="Download network visualization image"
-              >
-                <Download size={14} />
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Visualizer Frame */}
-        <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl relative flex items-center justify-center min-h-[580px] overflow-auto" id="visualizer-stage">
-          {simulating && (
-            <div className="absolute inset-0 bg-slate-100/60 backdrop-blur-xs flex flex-col items-center justify-center gap-3 rounded-xl z-20">
-              <RefreshCw size={36} className="animate-spin text-indigo-600" />
-              <span className="text-xs text-slate-600 font-semibold">Running realistic stress propagation...</span>
-            </div>
-          )}
-
-          {!simResult ? (
-            <div className="p-8 text-center space-y-3 max-w-sm" id="empty-viz">
-              <Network size={40} className="text-slate-300 mx-auto stroke-1" />
-              <h3 className="text-xs font-bold text-slate-700">No active simulation run</h3>
-              <p className="text-slate-400 text-[11px] leading-relaxed">
-                Choose seed shocks in the left panel and click <strong>Run Cascade Simulation</strong> to pre-render the cascading failure states in Python.
-              </p>
-            </div>
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center p-2" id="graph-image-container">
-              {simResult.plots[selectedWave] ? (
-                <img
-                  src={simResult.plots[selectedWave]}
-                  alt={`Wave ${selectedWave}`}
-                  style={{ width: `${imageScale}%` }}
-                  className="h-auto object-contain drop-shadow-sm select-none transition-all duration-200"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <span className="text-slate-400 text-xs">Error rendering wave frame</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Wave timeline control bar */}
-        {simResult && (
-          <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2" id="timeline-controls">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className={`p-1.5 rounded-lg border flex items-center justify-center cursor-pointer transition-colors ${
-                    isPlaying ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-white text-slate-700 border-slate-200"
-                  }`}
-                  id="play-pause-btn"
-                >
-                  {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
-                </button>
-                <span className="text-xs font-bold text-slate-800">
-                  Wave Stage: <span className="font-mono text-indigo-600">{selectedWave}</span> / {simResult.plots.length - 1}
-                </span>
-              </div>
-              <span className="text-[10px] font-mono font-semibold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
-                {selectedWave === 0 ? "Initial Shock State" : `Propagation wave ${selectedWave}`}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min="0"
-                max={simResult.plots.length - 1}
-                value={selectedWave}
-                onChange={(e) => {
-                  setSelectedWave(Number(e.target.value));
-                  setIsPlaying(false);
-                }}
-                className="flex-1 accent-indigo-600 h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-200"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 3. RIGHT PANEL - DASHBOARD / METRICS OUTPUT */}
-        <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-xs space-y-5" id="right-dashboard">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <BarChart4 size={16} className="text-slate-500" />
-            <h2 className="text-sm font-bold text-slate-900 font-sans">Simulation Dashboard</h2>
-          </div>
-          {simResult && (
-            <button
-              onClick={downloadCSV}
-              className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
-            >
-              <Download size={11} /> Export CSV
-            </button>
-          )}
-        </div>
-
-        {!simResult ? (
-          <div className="p-8 text-center text-slate-400 text-xs py-16">
-            Dashboard metrics will be compiled after running the simulation.
-          </div>
-        ) : (
-          <div className="space-y-6" id="dashboard-metrics">
+        {/* RIGHT SIDE - VISUALIZATION & DASHBOARD */}
+        <div className="lg:col-span-9 flex flex-col gap-6">
+          
+          {/* 2. MIDDLE PANEL - NETWORK VISUALIZATION */}
+          <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-xs space-y-4 flex flex-col justify-between" id="middle-visualization">
             
-            {/* KPI Stats Grid */}
-            <div className="grid grid-cols-2 gap-3" id="kpi-grid">
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Cascade Depth (CD)</span>
-                <span className="text-lg font-bold text-slate-900 font-mono">{simResult.cascade_depth} waves</span>
-                <span className="text-[9px] text-slate-400 block">Wave of convergence</span>
-              </div>
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Avg Stability (GSI)</span>
-                <span className="text-lg font-bold text-slate-900 font-mono">{(simResult.gsi[selectedWave] * 100).toFixed(1)}%</span>
-                <span className="text-[9px] text-slate-400 block">At wave {selectedWave}</span>
-              </div>
-            </div>
-
-            {/* Vulnerable Node count list */}
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
-              <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                <span>Vulnerable Indicators (S_v &lt; 0.3)</span>
-                <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md font-bold">{simResult.vnc[selectedWave]} nodes</span>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Network size={16} className="text-slate-500" />
+                <h2 className="text-sm font-bold text-slate-900 font-sans">Network Propagation Cascade Map</h2>
               </div>
               
-              {simResult.vulnerable_nodes[selectedWave]?.length === 0 ? (
-                <div className="text-[10px] text-emerald-600 font-sans font-semibold">No systems vulnerable. System stable.</div>
+              {simResult && (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                    <span className="font-semibold tracking-wider uppercase">Zoom</span>
+                    <input
+                      type="range"
+                      min="50"
+                      max="100"
+                      step="10"
+                      value={imageScale}
+                      onChange={(e) => setImageScale(Number(e.target.value))}
+                      className="w-20 sm:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                    />
+                    <span className="w-8 text-right">{imageScale}%</span>
+                  </div>
+                  <button
+                    onClick={downloadPNG}
+                    className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900 cursor-pointer"
+                    title="Download network visualization image"
+                  >
+                    <Download size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Visualizer Frame */}
+            <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl relative flex items-center justify-center min-h-[520px] overflow-auto" id="visualizer-stage">
+              {simulating && (
+                <div className="absolute inset-0 bg-slate-100/70 backdrop-blur-xs flex flex-col items-center justify-center gap-3 rounded-xl z-20">
+                  <RefreshCw size={36} className="animate-spin text-indigo-600" />
+                  <span className="text-xs text-slate-700 font-semibold">Simulating non-linear stress propagation...</span>
+                </div>
+              )}
+
+              {!simResult ? (
+                <div className="p-8 text-center space-y-3 max-w-sm" id="empty-viz">
+                  <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto shadow-2xs">
+                    <Network size={28} />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-bold text-slate-800">No active simulation run</h3>
+                    <p className="text-slate-500 text-[11px] leading-relaxed">
+                      Configure shocks and parameters, then click <strong>Run Cascade Simulation</strong> to render cascade dynamics.
+                    </p>
+                  </div>
+                </div>
               ) : (
-                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto" id="vuln-badges">
-                  {simResult.vulnerable_nodes[selectedWave]?.map((abbr) => {
-                    const nodeObj = nodes.find(n => n.abbr === abbr);
-                    const sVal = simResult.history[abbr]?.[selectedWave] ?? 1.0;
-                    return (
-                      <span
-                        key={abbr}
-                        title={`${nodeObj?.full_name || ""} — Stability: ${sVal.toFixed(2)}`}
-                        className="text-[9px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-100 px-1.5 py-0.5 rounded"
-                      >
-                        {abbr}:{(sVal * 100).toFixed(0)}%
-                      </span>
-                    );
-                  })}
+                <div className="w-full h-full flex flex-col items-center justify-center p-2" id="graph-image-container">
+                  {simResult.plots[selectedWave] ? (
+                    <img
+                      src={simResult.plots[selectedWave]}
+                      alt={`Wave ${selectedWave}`}
+                      style={{ width: `${imageScale}%` }}
+                      className="h-auto object-contain drop-shadow-sm select-none transition-all duration-200"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="text-slate-400 text-xs">Error rendering wave frame</span>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* CHART 1: Global Stability Index (GSI) & VNC over Waves */}
-            <div className="space-y-1">
-              <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                Global Stability Index (GSI)
-              </h3>
-              <div className="h-32 w-full" id="chart-gsi">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={getGSILineData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="wave" fontSize={9} fontStyle="italic" />
-                    <YAxis domain={[0, 1]} fontSize={9} />
-                    <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} />
-                    <Line type="monotone" dataKey="GSI" stroke="#4f46e5" strokeWidth={2} dot={{ r: 2 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* CHART 2: Custom Multi-Indicator stability over Waves */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                  Indicator Stability (S_v) Comparison
-                </h3>
-                {/* Node selection for comparing chart */}
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val && !selectedChartNodes.includes(val)) {
-                      setSelectedChartNodes([...selectedChartNodes, val]);
-                    }
-                  }}
-                  className="py-0.5 px-1 bg-slate-50 border border-slate-200 rounded text-[9px] font-mono focus:outline-none"
-                >
-                  <option value="">+ Add Chart Node</option>
-                  {nodes.map(n => (
-                    <option key={n.abbr} value={n.abbr}>{n.abbr}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Selected compare list */}
-              {selectedChartNodes.length > 0 && (
-                <div className="flex flex-wrap gap-1 pb-1" id="comparison-node-filters">
-                  {selectedChartNodes.map((abbr) => (
-                    <span key={abbr} className="inline-flex items-center gap-1 text-[9px] font-mono font-semibold bg-indigo-50 text-indigo-700 px-1 rounded">
-                      {abbr}
-                      <button
-                        onClick={() => setSelectedChartNodes(selectedChartNodes.filter(c => c !== abbr))}
-                        className="text-indigo-400 hover:text-indigo-700 font-bold ml-0.5"
-                      >
-                        ×
-                      </button>
+            {/* Wave timeline control bar */}
+            {simResult && (
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2" id="timeline-controls">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsPlaying(!isPlaying)}
+                      className={`p-1.5 rounded-lg border flex items-center justify-center cursor-pointer transition-colors ${
+                        isPlaying ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-white text-slate-700 border-slate-200"
+                      }`}
+                      id="play-pause-btn"
+                    >
+                      {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+                    </button>
+                    <span className="text-xs font-bold text-slate-800">
+                      Wave Stage: <span className="font-mono text-indigo-600">{selectedWave}</span> / {simResult.plots.length - 1}
                     </span>
-                  ))}
+                  </div>
+                  <span className="text-[10px] font-mono font-semibold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+                    {selectedWave === 0 ? "Initial Shock State (t = 0)" : `Propagation wave t = ${selectedWave}`}
+                  </span>
                 </div>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max={simResult.plots.length - 1}
+                    value={selectedWave}
+                    onChange={(e) => {
+                      setSelectedWave(Number(e.target.value));
+                      setIsPlaying(false);
+                    }}
+                    className="flex-1 accent-indigo-600 h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-200"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. DASHBOARD / METRICS OUTPUT */}
+          <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-xs space-y-5" id="right-dashboard">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <BarChart4 size={16} className="text-slate-500" />
+                <h2 className="text-sm font-bold text-slate-900 font-sans">Simulation Dashboard</h2>
+              </div>
+              {simResult && (
+                <button
+                  onClick={downloadCSV}
+                  className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                >
+                  <Download size={11} /> Export CSV
+                </button>
               )}
-
-              <div className="h-32 w-full" id="chart-node-compare">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={getNodeLineData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="wave" fontSize={9} />
-                    <YAxis domain={[0, 1]} fontSize={9} />
-                    <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} />
-                    {selectedChartNodes.map((abbr, idx) => {
-                      // pick unique stroke color
-                      const colors = ["#e11d48", "#16a34a", "#2563eb", "#ea580c", "#9333ea", "#0d9488"];
-                      const color = colors[idx % colors.length];
-                      return <Line key={abbr} type="monotone" dataKey={abbr} stroke={color} strokeWidth={1.5} dot={{ r: 1 }} />;
-                    })}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
             </div>
 
-            {/* Domain Spillover Bar Chart */}
-            <div className="space-y-1">
-              <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                Domain Vulnerability Spillover (Wave {selectedWave})
-              </h3>
-              
-              <div className="h-32 w-full" id="chart-spillover">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getSpilloverBarData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="domain" fontSize={8} tickLine={false} />
-                    <YAxis domain={[0, 100]} fontSize={9} tickFormatter={(v) => `${v}%`} />
-                    <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} formatter={(v) => [`${v}%`, "Vulnerable"]} />
-                    <Bar dataKey="fraction" fill="#4f46e5" radius={[4, 4, 0, 0]}>
-                      {getSpilloverBarData().map((entry, index) => {
-                        // use unique colors matching domain scheme if possible
-                        const colors = [
-                          "#3b82f6", "#10b981", "#ec4899", "#f59e0b", "#8b5cf6",
-                          "#ef4444", "#06b6d4", "#f97316", "#14b8a6", "#a855f7",
-                          "#84cc16", "#6366f1", "#d946ef", "#ff7f50", "#008080",
-                          "#b22222", "#4b0082", "#2e8b57", "#708090", "#9a3412"
-                        ];
-                        return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
-                      })}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+            {!simResult ? (
+              <div className="p-8 text-center text-slate-400 text-xs py-16">
+                Dashboard metrics and stability degradation curves will appear here after running the simulation.
               </div>
-              <p className="text-[9px] text-slate-400 text-center">Percentage of domain nodes with stability &lt; 0.3.</p>
-            </div>
+            ) : (
+              <div className="space-y-6" id="dashboard-metrics">
+                
+                {/* KPI Stats Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" id="kpi-grid">
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Cascade Depth (CD)</span>
+                    <span className="text-lg font-bold text-slate-900 font-mono">{simResult.cascade_depth} waves</span>
+                    <span className="text-[9px] text-slate-400 block">Wave of system convergence / equilibrium</span>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Avg Stability (GSI)</span>
+                    <span className="text-lg font-bold text-slate-900 font-mono">{(simResult.gsi[selectedWave] * 100).toFixed(1)}%</span>
+                    <span className="text-[9px] text-slate-400 block">At wave stage {selectedWave}</span>
+                  </div>
+                </div>
 
-            {/* SV Table summary */}
-            <div className="space-y-2 border-t border-slate-100 pt-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                  Node Stability Table
-                </h3>
-                <input
-                  type="text"
-                  placeholder="Filter table..."
-                  value={tableSearch}
-                  onChange={(e) => setTableSearch(e.target.value)}
-                  className="py-0.5 px-2 bg-slate-50 border border-slate-200 rounded text-[9px] font-sans focus:outline-none w-32"
-                />
-              </div>
-
-              <div className="max-h-40 overflow-y-auto border border-slate-100 rounded-lg text-[10px]" id="dashboard-table-container">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-500 font-mono text-[9px] border-b border-slate-100 sticky top-0">
-                      <th className="p-2">Abbr</th>
-                      <th className="p-2">Indicator Name</th>
-                      <th className="p-2 text-right">Stability S_v({selectedWave})</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {nodes
-                      .filter(n => n.abbr.toLowerCase().includes(tableSearch.toLowerCase()) || n.full_name.toLowerCase().includes(tableSearch.toLowerCase()))
-                      .map((node) => {
-                        const sVal = simResult.history[node.abbr]?.[selectedWave] ?? 1.0;
+                {/* Vulnerable Node count list */}
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
+                  <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                    <span>Vulnerable Indicators (S_v &lt; 0.3)</span>
+                    <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md font-bold">{simResult.vnc[selectedWave]} nodes</span>
+                  </div>
+                  
+                  {simResult.vulnerable_nodes[selectedWave]?.length === 0 ? (
+                    <div className="text-[10px] text-emerald-600 font-sans font-semibold">No systems vulnerable. Network remains stable.</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto" id="vuln-badges">
+                      {simResult.vulnerable_nodes[selectedWave]?.map((abbr) => {
+                        const nodeObj = nodes.find(n => n.abbr === abbr);
+                        const sVal = simResult.history[abbr]?.[selectedWave] ?? 1.0;
                         return (
-                          <tr key={node.abbr} className="hover:bg-slate-50/50">
-                            <td className="p-2 font-mono font-bold">{node.abbr}</td>
-                            <td className="p-2 font-medium truncate max-w-[120px]">{node.full_name}</td>
-                            <td className={`p-2 text-right font-mono font-bold ${
-                              sVal < 0.3 ? "text-rose-600" : sVal < 0.7 ? "text-amber-600" : "text-emerald-700"
-                            }`}>
-                              {(sVal * 100).toFixed(0)}%
-                            </td>
-                          </tr>
+                          <span
+                            key={abbr}
+                            title={`${nodeObj?.full_name || ""} — Stability: ${sVal.toFixed(2)}`}
+                            className="text-[9px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-100 px-1.5 py-0.5 rounded"
+                          >
+                            {abbr}:{(sVal * 100).toFixed(0)}%
+                          </span>
                         );
                       })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                    </div>
+                  )}
+                </div>
 
+                {/* CHART 1: Global Stability Index (GSI) over Waves */}
+                <div className="space-y-1">
+                  <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                    Global Stability Index (GSI)
+                  </h3>
+                  <div className="h-32 w-full" id="chart-gsi">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={getGSILineData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="wave" fontSize={9} fontStyle="italic" />
+                        <YAxis domain={[0, 1]} fontSize={9} />
+                        <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} />
+                        <Line type="monotone" dataKey="GSI" stroke="#4f46e5" strokeWidth={2} dot={{ r: 2 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* CHART 2: Custom Multi-Indicator stability over Waves */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                      Indicator Stability (S_v) Comparison
+                    </h3>
+                    {/* Node selection for comparing chart */}
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val && !selectedChartNodes.includes(val)) {
+                          setSelectedChartNodes([...selectedChartNodes, val]);
+                        }
+                      }}
+                      className="py-0.5 px-1 bg-slate-50 border border-slate-200 rounded text-[9px] font-mono focus:outline-none"
+                    >
+                      <option value="">+ Add Chart Node</option>
+                      {nodes.map(n => (
+                        <option key={n.abbr} value={n.abbr}>{n.abbr}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Selected compare list */}
+                  {selectedChartNodes.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pb-1" id="comparison-node-filters">
+                      {selectedChartNodes.map((abbr) => (
+                        <span key={abbr} className="inline-flex items-center gap-1 text-[9px] font-mono font-semibold bg-indigo-50 text-indigo-700 px-1 rounded">
+                          {abbr}
+                          <button
+                            onClick={() => setSelectedChartNodes(selectedChartNodes.filter(c => c !== abbr))}
+                            className="text-indigo-400 hover:text-indigo-700 font-bold ml-0.5 cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="h-32 w-full" id="chart-node-compare">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={getNodeLineData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="wave" fontSize={9} />
+                        <YAxis domain={[0, 1]} fontSize={9} />
+                        <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} />
+                        {selectedChartNodes.map((abbr, idx) => {
+                          const colors = ["#e11d48", "#16a34a", "#2563eb", "#ea580c", "#9333ea", "#0d9488"];
+                          const color = colors[idx % colors.length];
+                          return <Line key={abbr} type="monotone" dataKey={abbr} stroke={color} strokeWidth={1.5} dot={{ r: 1 }} />;
+                        })}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Domain Spillover Bar Chart */}
+                <div className="space-y-1">
+                  <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                    Domain Vulnerability Spillover (Wave {selectedWave})
+                  </h3>
+                  
+                  <div className="h-32 w-full" id="chart-spillover">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={getSpilloverBarData()} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="domain" fontSize={8} tickLine={false} />
+                        <YAxis domain={[0, 100]} fontSize={9} tickFormatter={(v) => `${v}%`} />
+                        <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} formatter={(v) => [`${v}%`, "Vulnerable"]} />
+                        <Bar dataKey="fraction" fill="#4f46e5" radius={[4, 4, 0, 0]}>
+                          {getSpilloverBarData().map((entry, index) => {
+                            const colors = [
+                              "#3b82f6", "#10b981", "#ec4899", "#f59e0b", "#8b5cf6",
+                              "#ef4444", "#06b6d4", "#f97316", "#14b8a6", "#a855f7",
+                              "#84cc16", "#6366f1", "#d946ef", "#ff7f50", "#008080",
+                              "#b22222", "#4b0082", "#2e8b57", "#708090", "#9a3412"
+                            ];
+                            return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                          })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-[9px] text-slate-400 text-center">Percentage of domain nodes with stability &lt; 0.3.</p>
+                </div>
+
+                {/* SV Table summary */}
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                      Node Stability Table
+                    </h3>
+                    <input
+                      type="text"
+                      placeholder="Filter table..."
+                      value={tableSearch}
+                      onChange={(e) => setTableSearch(e.target.value)}
+                      className="py-0.5 px-2 bg-slate-50 border border-slate-200 rounded text-[9px] font-sans focus:outline-none w-32"
+                    />
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto border border-slate-100 rounded-lg text-[10px]" id="dashboard-table-container">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 font-mono text-[9px] border-b border-slate-100 sticky top-0">
+                          <th className="p-2">Abbr</th>
+                          <th className="p-2">Indicator Name</th>
+                          <th className="p-2 text-right">Stability S_v({selectedWave})</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {nodes
+                          .filter(n => n.abbr.toLowerCase().includes(tableSearch.toLowerCase()) || n.full_name.toLowerCase().includes(tableSearch.toLowerCase()))
+                          .map((node) => {
+                            const sVal = simResult.history[node.abbr]?.[selectedWave] ?? 1.0;
+                            return (
+                              <tr key={node.abbr} className="hover:bg-slate-50/50">
+                                <td className="p-2 font-mono font-bold">{node.abbr}</td>
+                                <td className="p-2 font-medium truncate max-w-[120px]">{node.full_name}</td>
+                                <td className={`p-2 text-right font-mono font-bold ${
+                                  sVal < 0.3 ? "text-rose-600" : sVal < 0.7 ? "text-amber-600" : "text-emerald-700"
+                                }`}>
+                                  {(sVal * 100).toFixed(0)}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
-        )}
-      </div>
+
+        </div>
 
       </div>
 
