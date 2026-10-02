@@ -1,6 +1,6 @@
 import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDocs, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Domain, NodeIndicator, Edge, SimulatorParams, SavedNetworkConfig } from "./types";
+import { Domain, NodeIndicator, Edge, SimulatorParams, SavedNetworkConfig, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS, AppUserAccount, DEFAULT_USER_ACCOUNTS, LearnVisibilityConfig, DEFAULT_LEARN_VISIBILITY } from "./types";
 import { DEFAULT_DOMAINS, DEFAULT_NODES, parseDefaultEdges, SIMPLE_DOMAINS, SIMPLE_NODES, parseSimpleEdges } from "./defaultNetwork";
 
 type Listener<T> = (data: T[]) => void;
@@ -32,6 +32,9 @@ class DataService {
   private nodes: NodeIndicator[] = [];
   private edges: Edge[] = [];
   private params: SimulatorParams = { ...DEFAULT_PARAMS };
+  private limits: SimulationLimitsConfig = { ...DEFAULT_SIMULATION_LIMITS };
+  private accounts: AppUserAccount[] = [...DEFAULT_USER_ACCOUNTS];
+  private learnVisibility: LearnVisibilityConfig = { ...DEFAULT_LEARN_VISIBILITY };
   private isLocalOnly = false;
   private isLoaded = false;
   private currentUser: any = null;
@@ -41,8 +44,14 @@ class DataService {
   private edgeListeners: Set<Listener<Edge>> = new Set();
   private paramsListeners: Set<(p: SimulatorParams) => void> = new Set();
   private statusListeners: Set<(isLocal: boolean) => void> = new Set();
+  private limitsListeners: Set<(l: SimulationLimitsConfig) => void> = new Set();
+  private accountsListeners: Set<(accs: AppUserAccount[]) => void> = new Set();
+  private learnVisibilityListeners: Set<(v: LearnVisibilityConfig) => void> = new Set();
 
   private unsubs: (() => void)[] = [];
+  private systemUnsub: (() => void) | null = null;
+  private accountsUnsub: (() => void) | null = null;
+  private learnVisibilityUnsub: (() => void) | null = null;
 
   constructor() {
     this.init();
@@ -51,6 +60,156 @@ class DataService {
   private init() {
     // Try to load local storage copies first so we have immediate data
     this.loadFromLocalStorage();
+    this.loadAccountsFromLocalStorage();
+    this.loadLearnVisibilityFromLocalStorage();
+    this.initSystemLimitsListener();
+    this.initAccountsListener();
+    this.initLearnVisibilityListener();
+  }
+
+  private loadAccountsFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem("ursa_user_accounts");
+      if (saved) {
+        const parsed: AppUserAccount[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge defaults with saved accounts to ensure Summer 2026 is assigned
+          const accountMap = new Map<string, AppUserAccount>();
+          DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id, a));
+          parsed.forEach((a) => accountMap.set(a.id, a));
+          this.accounts = Array.from(accountMap.values());
+        }
+      } else {
+        localStorage.setItem("ursa_user_accounts", JSON.stringify(DEFAULT_USER_ACCOUNTS));
+      }
+    } catch (e) {
+      this.accounts = [...DEFAULT_USER_ACCOUNTS];
+    }
+  }
+
+  private saveAccountsToLocalStorage() {
+    try {
+      localStorage.setItem("ursa_user_accounts", JSON.stringify(this.accounts));
+    } catch (e) {
+      console.warn("Failed to write user accounts to local storage:", e);
+    }
+  }
+
+  private initAccountsListener() {
+    try {
+      if (this.accountsUnsub) {
+        this.accountsUnsub();
+      }
+      this.accountsUnsub = onSnapshot(
+        doc(db, "system", "user_accounts"),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data?.accounts && Array.isArray(data.accounts)) {
+              // Merge default user accounts with firestore accounts
+              const accountMap = new Map<string, AppUserAccount>();
+              DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id, a));
+              data.accounts.forEach((a: AppUserAccount) => accountMap.set(a.id, a));
+              this.accounts = Array.from(accountMap.values());
+              this.saveAccountsToLocalStorage();
+              this.notifyAccountsListeners();
+            }
+          }
+        },
+        (err) => {
+          console.warn("System accounts Firestore listener warning, using local:", err);
+        }
+      );
+    } catch (e) {
+      console.warn("Failed to attach system accounts listener:", e);
+    }
+  }
+
+  private notifyAccountsListeners() {
+    this.accountsListeners.forEach((l) => l([...this.accounts]));
+  }
+
+  private initSystemLimitsListener() {
+    try {
+      if (this.systemUnsub) {
+        this.systemUnsub();
+      }
+      this.systemUnsub = onSnapshot(
+        doc(db, "system", "slider_limits"),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as Partial<SimulationLimitsConfig>;
+            this.limits = {
+              ...DEFAULT_SIMULATION_LIMITS,
+              ...data
+            };
+          } else {
+            // Keep default limits
+          }
+          this.notifyLimitsListeners();
+          try {
+            localStorage.setItem("ursa_simulation_limits", JSON.stringify(this.limits));
+          } catch (e) {
+            // LocalStorage quota or blocked
+          }
+        },
+        (err) => {
+          console.warn("System slider limits Firestore listener failed, using local/default:", err);
+        }
+      );
+    } catch (e) {
+      console.warn("Failed to attach system slider limits listener:", e);
+    }
+  }
+
+  private loadLearnVisibilityFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem("ursa_learn_visibility");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        this.learnVisibility = {
+          ...DEFAULT_LEARN_VISIBILITY,
+          ...parsed
+        };
+      }
+    } catch (e) {
+      this.learnVisibility = { ...DEFAULT_LEARN_VISIBILITY };
+    }
+  }
+
+  private initLearnVisibilityListener() {
+    try {
+      if (this.learnVisibilityUnsub) {
+        this.learnVisibilityUnsub();
+      }
+      this.learnVisibilityUnsub = onSnapshot(
+        doc(db, "system", "learn_visibility"),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as Partial<LearnVisibilityConfig>;
+            this.learnVisibility = {
+              ...DEFAULT_LEARN_VISIBILITY,
+              ...data
+            };
+          }
+          this.notifyLearnVisibilityListeners();
+          try {
+            localStorage.setItem("ursa_learn_visibility", JSON.stringify(this.learnVisibility));
+          } catch (e) {
+            // LocalStorage blocked
+          }
+        },
+        (err) => {
+          console.warn("System learn visibility Firestore listener failed, using local/default:", err);
+        }
+      );
+    } catch (e) {
+      console.warn("Failed to attach system learn visibility listener:", e);
+    }
+  }
+
+  private notifyLearnVisibilityListeners() {
+    this.learnVisibilityListeners.forEach((listener) => listener({ ...this.learnVisibility }));
   }
 
   // Set the current authenticated user from App component
@@ -153,14 +312,27 @@ class DataService {
         }
       }
 
-      await setDoc(userRef, {
+      const account = this.getAccountByUsername(userName);
+      const isAdminAccount = account?.role === "admin" || userName === "admin";
+      const term = isAdminAccount ? undefined : (account?.term || "Summer 2026");
+      const season = isAdminAccount ? undefined : (account?.season || "Summer");
+      const year = isAdminAccount ? undefined : (account?.year || 2026);
+
+      const updatePayload: any = {
         uid: user.uid,
         email: user.email || "",
         displayName: displayName,
         userName: userName,
         name: name,
+        role: isAdminAccount ? "admin" : (account?.role || "user"),
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      };
+
+      if (term) updatePayload.term = term;
+      if (season) updatePayload.season = season;
+      if (year) updatePayload.year = year;
+
+      await setDoc(userRef, updatePayload, { merge: true });
     } catch (e) {
       console.warn("Failed to write user metadata to Firestore:", e);
     }
@@ -401,15 +573,80 @@ class DataService {
     this.statusListeners.forEach((listener) => listener(this.isLocalOnly));
   }
 
+  private notifyLimitsListeners() {
+    this.limitsListeners.forEach((listener) => listener({ ...this.limits }));
+  }
+
   private notifyAll() {
     this.notifyDomainListeners();
     this.notifyNodeListeners();
     this.notifyEdgeListeners();
     this.notifyParamsListeners();
     this.notifyStatusListeners();
+    this.notifyLimitsListeners();
   }
 
   // Real-time Subscriptions
+  public subscribeLimits(listener: (l: SimulationLimitsConfig) => void): () => void {
+    this.limitsListeners.add(listener);
+    listener({ ...this.limits });
+    return () => this.limitsListeners.delete(listener);
+  }
+
+  public getSimulationLimits(): SimulationLimitsConfig {
+    return { ...this.limits };
+  }
+
+  public async saveSimulationLimits(newLimits: SimulationLimitsConfig): Promise<void> {
+    this.limits = { ...newLimits };
+    this.notifyLimitsListeners();
+    try {
+      localStorage.setItem("ursa_simulation_limits", JSON.stringify(this.limits));
+    } catch (e) {
+      console.warn("Failed to write simulation limits to localStorage:", e);
+    }
+
+    try {
+      await setDoc(doc(db, "system", "slider_limits"), newLimits);
+    } catch (e) {
+      console.warn("Failed to write simulation limits to Firestore, saved locally:", e);
+    }
+  }
+
+  public async resetSimulationLimits(): Promise<void> {
+    await this.saveSimulationLimits(DEFAULT_SIMULATION_LIMITS);
+  }
+
+  // Learn Curriculum Section Visibility
+  public subscribeLearnVisibility(listener: (v: LearnVisibilityConfig) => void): () => void {
+    this.learnVisibilityListeners.add(listener);
+    listener({ ...this.learnVisibility });
+    return () => this.learnVisibilityListeners.delete(listener);
+  }
+
+  public getLearnVisibility(): LearnVisibilityConfig {
+    return { ...this.learnVisibility };
+  }
+
+  public async saveLearnVisibility(newVisibility: LearnVisibilityConfig): Promise<void> {
+    this.learnVisibility = { ...newVisibility };
+    this.notifyLearnVisibilityListeners();
+    try {
+      localStorage.setItem("ursa_learn_visibility", JSON.stringify(this.learnVisibility));
+    } catch (e) {
+      console.warn("Failed to write learn visibility to localStorage:", e);
+    }
+
+    try {
+      await setDoc(doc(db, "system", "learn_visibility"), newVisibility);
+    } catch (e) {
+      console.warn("Failed to write learn visibility to Firestore, saved locally:", e);
+    }
+  }
+
+  public async resetLearnVisibility(): Promise<void> {
+    await this.saveLearnVisibility(DEFAULT_LEARN_VISIBILITY);
+  }
   public subscribeDomains(listener: Listener<Domain>): () => void {
     this.domainListeners.add(listener);
     listener([...this.domains]);
@@ -776,6 +1013,88 @@ class DataService {
       } catch (e) {
         console.warn("Failed to write to Firestore, deleted locally:", e);
       }
+    }
+  }
+
+  // Account & Academic Term Management
+  public subscribeAccounts(listener: (accounts: AppUserAccount[]) => void): () => void {
+    this.accountsListeners.add(listener);
+    listener([...this.accounts]);
+    return () => this.accountsListeners.delete(listener);
+  }
+
+  public getAccounts(): AppUserAccount[] {
+    return [...this.accounts];
+  }
+
+  public getAccountByUsername(username: string): AppUserAccount | undefined {
+    const clean = username.trim().toLowerCase();
+    return this.accounts.find((a) => a.username.toLowerCase() === clean || a.id.toLowerCase() === clean);
+  }
+
+  public async createUserAccount(accountData: Omit<AppUserAccount, "createdAt">): Promise<void> {
+    const clean = accountData.username.trim().toLowerCase();
+    if (!clean) {
+      throw new Error("Username cannot be empty.");
+    }
+    const exists = this.accounts.some((a) => a.id === clean || a.username.toLowerCase() === clean);
+    if (exists) {
+      throw new Error(`Username '${accountData.username}' already exists.`);
+    }
+
+    const newAccount: AppUserAccount = {
+      ...accountData,
+      id: clean,
+      username: clean,
+      createdAt: new Date().toISOString()
+    };
+
+    this.accounts = [...this.accounts, newAccount];
+    this.notifyAccountsListeners();
+    this.saveAccountsToLocalStorage();
+
+    try {
+      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
+    }
+  }
+
+  public async updateUserAccount(username: string, updates: Partial<AppUserAccount>): Promise<void> {
+    const clean = username.trim().toLowerCase();
+    this.accounts = this.accounts.map((a) => {
+      if (a.id === clean || a.username.toLowerCase() === clean) {
+        return {
+          ...a,
+          ...updates,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return a;
+    });
+    this.notifyAccountsListeners();
+    this.saveAccountsToLocalStorage();
+
+    try {
+      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
+    }
+  }
+
+  public async deleteUserAccount(username: string): Promise<void> {
+    const clean = username.trim().toLowerCase();
+    if (clean === "admin") {
+      throw new Error("Cannot delete primary administrator account.");
+    }
+    this.accounts = this.accounts.filter((a) => a.id !== clean && a.username.toLowerCase() !== clean);
+    this.notifyAccountsListeners();
+    this.saveAccountsToLocalStorage();
+
+    try {
+      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
     }
   }
 }

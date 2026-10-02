@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult } from "../types";
+import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
 import { dataService } from "../dataService";
 import { runSimulationClient, SimulationPayload } from "../lib/simulationClient";
 import { 
@@ -12,7 +12,9 @@ import {
   BarChart4, 
   Network, 
   AlertTriangle,
-  Zap
+  Zap,
+  Image as ImageIcon,
+  FileSpreadsheet
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -57,11 +59,12 @@ export default function SimulatorPage() {
   };
 
   // Simulation parameters states
+  const [limits, setLimits] = useState<SimulationLimitsConfig>({ ...DEFAULT_SIMULATION_LIMITS });
   const [T, setT] = useState(10);
-  const [theta, setTheta] = useState(0.20); // Failure threshold: 0 - 0.4
+  const [theta, setTheta] = useState(0.20); // Failure threshold
   const [gamma, setGamma] = useState(1.5);
   const [epsilon, setEpsilon] = useState(0.001);
-  const [rv, setRv] = useState(0.050); // Passive recovery: 0 - 0.1
+  const [rv, setRv] = useState(0.050); // Passive recovery
   const [parameterMode, setParameterMode] = useState<"network" | "node">("network");
 
   // Shocks list
@@ -137,15 +140,17 @@ export default function SimulatorPage() {
       setLoadingNodes(false);
     });
 
+    const unsubLimits = dataService.subscribeLimits((l) => {
+      setLimits(l);
+    });
+
     const unsubParams = dataService.subscribeParams((p) => {
       if (p) {
         setT(p.T ?? 10);
-        // Clamp failure threshold to 0 - 0.4
-        setTheta(p.theta !== undefined ? Math.min(0.40, Math.max(0.00, p.theta)) : 0.20);
+        setTheta(p.theta !== undefined ? p.theta : 0.20);
         setGamma(p.gamma ?? 1.5);
         setEpsilon(p.epsilon ?? 0.001);
-        // Clamp passive recovery to 0 - 0.1
-        setRv(p.rv !== undefined ? Math.min(0.10, Math.max(0.00, p.rv)) : 0.050);
+        setRv(p.rv !== undefined ? p.rv : 0.050);
         if (p.parameterMode) setParameterMode(p.parameterMode);
         if (p.shocks) setShocks(p.shocks);
         if (p.interventions) setInterventions(p.interventions);
@@ -160,6 +165,7 @@ export default function SimulatorPage() {
       unsubDomains();
       unsubNodes();
       unsubEdges();
+      unsubLimits();
       unsubParams();
       unsubStatus();
     };
@@ -442,13 +448,56 @@ export default function SimulatorPage() {
 
   const downloadPNG = () => {
     if (!simResult || !simResult.plots[selectedWave]) return;
-    const base64Data = simResult.plots[selectedWave];
-    const link = document.createElement("a");
-    link.setAttribute("href", base64Data);
-    link.setAttribute("download", `cascade_network_wave_${selectedWave}.png`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const svgDataUri = simResult.plots[selectedWave];
+    const img = new Image();
+    img.onload = () => {
+      const baseWidth = img.naturalWidth || 420;
+      const baseHeight = img.naturalHeight || 570;
+      const scaleFactor = 3; // 3x high-resolution rendering
+      const width = baseWidth * scaleFactor;
+      const height = baseHeight * scaleFactor;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const pngUrl = canvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.href = pngUrl;
+      link.download = `ursa_cascade_simulation_wave_${selectedWave}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+    img.src = svgDataUri;
+  };
+
+  const downloadSVG = () => {
+    if (!simResult || !simResult.plots[selectedWave]) return;
+    const svgDataUri = simResult.plots[selectedWave];
+    const base64Index = svgDataUri.indexOf("base64,");
+    if (base64Index === -1) return;
+
+    try {
+      const svgText = decodeURIComponent(escape(atob(svgDataUri.substring(base64Index + 7))));
+      const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ursa_cascade_simulation_wave_${selectedWave}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
@@ -545,9 +594,9 @@ export default function SimulatorPage() {
               <span className="text-slate-400 font-mono">Intensity (δ_v):</span>
               <input
                 type="range"
-                min="0.1"
-                max="1.0"
-                step="0.05"
+                min={limits.shockIntensity.min}
+                max={limits.shockIntensity.max}
+                step={limits.shockIntensity.step}
                 value={newShockIntensity}
                 onChange={(e) => setNewShockIntensity(Number(e.target.value))}
                 className="w-24 accent-slate-900 cursor-pointer"
@@ -588,9 +637,9 @@ export default function SimulatorPage() {
               </div>
               <input
                 type="range"
-                min="1"
-                max="20"
-                step="1"
+                min={limits.T.min}
+                max={limits.T.max}
+                step={limits.T.step}
                 value={T}
                 onChange={(e) => setT(Number(e.target.value))}
                 className="w-full accent-slate-900 cursor-pointer"
@@ -605,9 +654,9 @@ export default function SimulatorPage() {
               </div>
               <input
                 type="range"
-                min="1.0"
-                max="3.0"
-                step="0.1"
+                min={limits.gamma.min}
+                max={limits.gamma.max}
+                step={limits.gamma.step}
                 value={gamma}
                 onChange={(e) => setGamma(Number(e.target.value))}
                 className="w-full accent-slate-900 cursor-pointer"
@@ -661,7 +710,7 @@ export default function SimulatorPage() {
               )}
             </div>
 
-            {/* 4. Threshold (theta) - constrained between 0 - 0.4 */}
+            {/* 4. Threshold (theta) */}
             <div className={`space-y-1 p-2 rounded-lg border transition-all ${
               parameterMode === "node"
                 ? "bg-slate-100/60 border-slate-200 opacity-60"
@@ -670,28 +719,28 @@ export default function SimulatorPage() {
               <div className="flex justify-between items-center text-[11px] text-slate-700 font-medium">
                 <span>Failure Threshold (θ):</span>
                 {parameterMode === "network" ? (
-                  <span className="font-mono font-bold text-indigo-700">{theta.toFixed(2)}</span>
+                  <span className="font-mono font-bold text-indigo-700">{theta.toFixed(limits.theta.step < 0.01 ? 3 : 2)}</span>
                 ) : (
                   <span className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">Per-Node Defined</span>
                 )}
               </div>
               <input
                 type="range"
-                min="0.00"
-                max="0.40"
-                step="0.01"
+                min={limits.theta.min}
+                max={limits.theta.max}
+                step={limits.theta.step}
                 disabled={parameterMode === "node"}
-                value={Math.min(0.40, Math.max(0.00, theta))}
+                value={Math.min(limits.theta.max, Math.max(limits.theta.min, theta))}
                 onChange={(e) => setTheta(Number(e.target.value))}
                 className={`w-full accent-indigo-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
               />
               <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                <span>0.00 (Fragile)</span>
-                <span>0.40 (Resilient)</span>
+                <span>{limits.theta.min.toFixed(2)} (Fragile)</span>
+                <span>{limits.theta.max.toFixed(2)} (Resilient)</span>
               </div>
             </div>
 
-            {/* 5. Passive Recovery (rv) - constrained between 0 - 0.1 */}
+            {/* 5. Passive Recovery (rv) */}
             <div className={`space-y-1 p-2 rounded-lg border transition-all ${
               parameterMode === "node"
                 ? "bg-slate-100/60 border-slate-200 opacity-60"
@@ -700,24 +749,24 @@ export default function SimulatorPage() {
               <div className="flex justify-between items-center text-[11px] text-slate-700 font-medium">
                 <span>Passive Recovery (r_v):</span>
                 {parameterMode === "network" ? (
-                  <span className="font-mono font-bold text-emerald-700">{rv.toFixed(3)}</span>
+                  <span className="font-mono font-bold text-emerald-700">{rv.toFixed(limits.rv.step < 0.01 ? 3 : 2)}</span>
                 ) : (
                   <span className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">Per-Node Defined</span>
                 )}
               </div>
               <input
                 type="range"
-                min="0.000"
-                max="0.100"
-                step="0.005"
+                min={limits.rv.min}
+                max={limits.rv.max}
+                step={limits.rv.step}
                 disabled={parameterMode === "node"}
-                value={Math.min(0.100, Math.max(0.000, rv))}
+                value={Math.min(limits.rv.max, Math.max(limits.rv.min, rv))}
                 onChange={(e) => setRv(Number(e.target.value))}
                 className={`w-full accent-emerald-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
               />
               <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                <span>0.000 (No Recovery)</span>
-                <span>0.100 (Max Natural)</span>
+                <span>{limits.rv.min.toFixed(3)} (No Recovery)</span>
+                <span>{limits.rv.max.toFixed(3)} (Max Natural)</span>
               </div>
             </div>
 
@@ -726,10 +775,12 @@ export default function SimulatorPage() {
               <span>Tolerance (ε):</span>
               <input
                 type="number"
-                step="0.0001"
+                min={limits.epsilon.min}
+                max={limits.epsilon.max}
+                step={limits.epsilon.step}
                 value={epsilon}
                 onChange={(e) => setEpsilon(Number(e.target.value))}
-                className="w-20 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-md font-mono font-bold text-right text-xs"
+                className="w-24 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-md font-mono font-bold text-right text-xs"
               />
             </div>
           </div>
@@ -774,9 +825,9 @@ export default function SimulatorPage() {
               <span className="text-slate-400 font-mono">Boost (+i_v):</span>
               <input
                 type="range"
-                min="0.005"
-                max="0.05"
-                step="0.002"
+                min={limits.interventionStrength.min}
+                max={limits.interventionStrength.max}
+                step={limits.interventionStrength.step}
                 value={newIntervStrength}
                 onChange={(e) => setNewIntervStrength(Number(e.target.value))}
                 className="w-24 accent-slate-900 cursor-pointer"
@@ -843,8 +894,8 @@ export default function SimulatorPage() {
               </div>
               
               {simResult && (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">
                     <span className="font-semibold tracking-wider uppercase">Zoom</span>
                     <input
                       type="range"
@@ -853,16 +904,25 @@ export default function SimulatorPage() {
                       step="10"
                       value={imageScale}
                       onChange={(e) => setImageScale(Number(e.target.value))}
-                      className="w-20 sm:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                      className="w-16 sm:w-20 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                     />
-                    <span className="w-8 text-right">{imageScale}%</span>
+                    <span className="w-7 text-right">{imageScale}%</span>
                   </div>
                   <button
                     onClick={downloadPNG}
-                    className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900 cursor-pointer"
-                    title="Download network visualization image"
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-md transition-colors shadow-2xs cursor-pointer"
+                    title="Save current wave visualization as PNG image"
                   >
-                    <Download size={14} />
+                    <ImageIcon size={12} className="text-indigo-600" />
+                    <span>Save PNG</span>
+                  </button>
+                  <button
+                    onClick={downloadSVG}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-md transition-colors shadow-2xs cursor-pointer"
+                    title="Save current wave visualization as vector SVG file"
+                  >
+                    <Download size={12} className="text-emerald-600" />
+                    <span>Save SVG</span>
                   </button>
                 </div>
               )}

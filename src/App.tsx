@@ -6,12 +6,13 @@ import LoginPage from "./components/LoginPage";
 import LearnPage from "./components/LearnPage";
 import ConfigPage from "./components/ConfigPage";
 import SimulatorPage from "./components/SimulatorPage";
-import { Network, LogOut, BookOpen, Sliders, Activity, User as UserIcon, RefreshCw } from "lucide-react";
+import AdminSettingsPage from "./components/AdminSettingsPage";
+import { Network, LogOut, BookOpen, Sliders, Activity, User as UserIcon, RefreshCw, SlidersHorizontal, Shield } from "lucide-react";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"learn" | "config" | "simulator">("learn");
+  const [activeTab, setActiveTab] = useState<"learn" | "config" | "simulator" | "settings">("learn");
 
   // Track Auth state
   useEffect(() => {
@@ -76,6 +77,7 @@ export default function App() {
   }
 
   const emailPrefix = user?.email ? user.email.split("@")[0].toLowerCase() : "";
+  const isAdmin = emailPrefix === "admin" || (user?.email && user.email.toLowerCase().includes("admin")) || false;
   let userDisplayName = "User";
   let modeDisplayName = "Mode A";
 
@@ -95,6 +97,9 @@ export default function App() {
     userDisplayName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
     modeDisplayName = "Mode Default";
   }
+
+  const userAccount = dataService.getAccountByUsername(emailPrefix);
+  const userTerm = userAccount?.term || user?.term || "Summer 2026";
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col" id="app-main-layout">
@@ -155,15 +160,42 @@ export default function App() {
                 <Activity size={13} />
                 <span className="hidden sm:inline">Simulator</span>
               </button>
+
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab("settings")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeTab === "settings"
+                      ? "bg-[#2ea043] text-white shadow-xs"
+                      : "text-[#34D399] bg-[#383A42] hover:bg-[#42454E] border border-[#42454E]"
+                  }`}
+                  id="nav-settings"
+                  title="Admin controls: Users, academic terms, and simulation parameter limits"
+                >
+                  <SlidersHorizontal size={13} />
+                  <span className="hidden sm:inline">Admin Settings</span>
+                </button>
+              )}
             </nav>
 
             {/* User Account Menu */}
             <div className="flex items-center gap-2 sm:gap-3" id="app-user-menu">
               <div className="hidden md:flex flex-col items-end text-right">
-                <span className="text-[11px] font-semibold text-slate-800 tracking-tight font-sans">
-                  {userDisplayName}
-                </span>
-                <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider font-bold">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-[#F1F3F5] tracking-tight font-sans">
+                    {userDisplayName}
+                  </span>
+                  {isAdmin ? (
+                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 bg-[#34D399]/15 text-[#34D399] rounded-md border border-[#34D399]/30">
+                      System Admin
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 bg-[#383A42] text-[#34D399] rounded-md border border-[#42454E]">
+                      {userTerm}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-[#A6A7AB] font-mono uppercase tracking-wider font-bold">
                   {modeDisplayName}
                 </span>
               </div>
@@ -190,14 +222,15 @@ export default function App() {
 
       {/* Main View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6" id="app-main-content">
-        {activeTab === "learn" && <LearnPage />}
+        {activeTab === "learn" && <LearnPage isAdmin={isAdmin} />}
         {activeTab === "config" && <ConfigPage />}
         {activeTab === "simulator" && <SimulatorPage />}
+        {activeTab === "settings" && <AdminSettingsPage />}
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-3 text-center" id="app-footer">
-        <div className="max-w-7xl mx-auto px-4 text-[10px] font-mono text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="bg-[#2E3036] border-t border-[#42454E] py-3 text-center" id="app-footer">
+        <div className="max-w-7xl mx-auto px-4 text-[10px] font-mono text-[#A6A7AB] flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>URSA - Urban Intelligence Studio v1.2.0</span>
           <span>Security Context: Firestore Encrypted Core DB &bull; Active Node Session</span>
         </div>

@@ -1,56 +1,56 @@
 @import "tailwindcss";
 
 @theme {
-  --color-white: #161B22;
-  --color-slate-50: #0B0E14;
-  --color-slate-100: #21262D;
-  --color-slate-200: #30363D;
-  --color-slate-300: #484F58;
-  --color-slate-400: #8B949E;
-  --color-slate-500: #8B949E;
-  --color-slate-600: #8B949E;
-  --color-slate-700: #C9D1D9;
-  --color-slate-800: #E6EDF0;
-  --color-slate-900: #161B22;
-  --color-slate-950: #0B0E14;
+  --color-white: #2E3036;
+  --color-slate-50: #25262B;
+  --color-slate-100: #383A42;
+  --color-slate-200: #42454E;
+  --color-slate-300: #565A66;
+  --color-slate-400: #A6A7AB;
+  --color-slate-500: #A6A7AB;
+  --color-slate-600: #A6A7AB;
+  --color-slate-700: #D0D3D7;
+  --color-slate-800: #F1F3F5;
+  --color-slate-900: #2E3036;
+  --color-slate-950: #25262B;
 
-  --color-indigo-50: #21262D;
-  --color-indigo-100: #30363D;
-  --color-indigo-200: #30363D;
-  --color-indigo-500: #238636;
-  --color-indigo-600: #238636;
-  --color-indigo-700: #238636;
-  --color-indigo-800: #2ea043;
+  --color-indigo-50: #383A42;
+  --color-indigo-100: #42454E;
+  --color-indigo-200: #42454E;
+  --color-indigo-500: #2ea043;
+  --color-indigo-600: #2ea043;
+  --color-indigo-700: #2ea043;
+  --color-indigo-800: #34D399;
   --color-indigo-900: #FFFFFF;
 
-  --color-emerald-50: #21262D;
-  --color-emerald-100: #30363D;
-  --color-emerald-500: #238636;
-  --color-emerald-600: #238636;
-  --color-emerald-700: #2ea043;
+  --color-emerald-50: #383A42;
+  --color-emerald-100: #42454E;
+  --color-emerald-500: #34D399;
+  --color-emerald-600: #2ea043;
+  --color-emerald-700: #34D399;
 
-  --color-rose-50: rgba(215, 58, 73, 0.1);
-  --color-rose-100: rgba(215, 58, 73, 0.2);
-  --color-rose-200: rgba(215, 58, 73, 0.3);
-  --color-rose-500: #D73A49;
-  --color-rose-600: #D73A49;
-  --color-rose-700: #E05260;
+  --color-rose-50: rgba(224, 82, 96, 0.12);
+  --color-rose-100: rgba(224, 82, 96, 0.2);
+  --color-rose-200: rgba(224, 82, 96, 0.3);
+  --color-rose-500: #E05260;
+  --color-rose-600: #E05260;
+  --color-rose-700: #EB6B78;
 
-  --color-amber-50: rgba(227, 179, 65, 0.1);
-  --color-amber-100: rgba(227, 179, 65, 0.2);
-  --color-amber-500: #E3B341;
-  --color-amber-600: #E3B341;
-  --color-amber-700: #F1C250;
+  --color-amber-50: rgba(245, 158, 11, 0.12);
+  --color-amber-100: rgba(245, 158, 11, 0.2);
+  --color-amber-500: #F59E0B;
+  --color-amber-600: #F59E0B;
+  --color-amber-700: #FBBF24;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
 }
 
 /* --- Global Body & Scrollbar Styling --- */
 html, body {
-  background-color: #0B0E14 !important;
-  color: #C9D1D9 !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background-color: #25262B !important;
+  color: #D0D3D7 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 /* Scrollbars */
@@ -59,38 +59,38 @@ html, body {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #0B0E14;
+  background: #25262B;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363D;
+  background: #42454E;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #484F58;
+  background: #565A66;
 }
 
 /* Ensure background colors are applied robustly */
 .bg-white, [class*="bg-white"] {
-  background-color: #161B22 !important;
-  color: #C9D1D9 !important;
+  background-color: #2E3036 !important;
+  color: #D0D3D7 !important;
 }
 
 /* Border styles */
 .border, .border-b, .border-t, .border-l, .border-r {
-  border-color: #30363D !important;
+  border-color: #42454E !important;
 }
 
 /* Header customization */
 #app-header {
-  background-color: #161B22 !important;
-  border-bottom: 1px solid #30363D !important;
+  background-color: #2E3036 !important;
+  border-bottom: 1px solid #42454E !important;
   height: 56px !important;
   backdrop-filter: none !important;
 }
 
-/* Navigation buttons styled like Github Tabs */
+/* Navigation buttons */
 #app-nav button {
-  color: #8B949E !important;
+  color: #A6A7AB !important;
   background-color: transparent !important;
   border-bottom: 2px solid transparent !important;
   border-radius: 0 !important;
@@ -101,11 +101,11 @@ html, body {
   box-shadow: none !important;
 }
 #app-nav button:hover {
-  color: #FFFFFF !important;
+  color: #F1F3F5 !important;
 }
 #app-nav button.bg-slate-900, #app-nav button[class*="bg-slate-900"] {
-  color: #FFFFFF !important;
-  border-bottom-color: #238636 !important;
+  color: #F1F3F5 !important;
+  border-bottom-color: #34D399 !important;
   background-color: transparent !important;
   font-weight: 600 !important;
 }
@@ -115,35 +115,35 @@ html, body {
   font-weight: 800;
   font-size: 20px;
   letter-spacing: 1px;
-  color: #FFFFFF;
+  color: #F1F3F5;
 }
 #app-logo span {
-  color: #238636;
+  color: #34D399;
 }
 #app-logo div.bg-slate-900 {
-  background-color: #238636 !important;
+  background-color: #34D399 !important;
 }
 
 /* Forms: Inputs, Select, Textarea */
 input, select, textarea {
-  background-color: #0B0E14 !important;
-  border: 1px solid #30363D !important;
-  color: #C9D1D9 !important;
+  background-color: #1E1F23 !important;
+  border: 1px solid #42454E !important;
+  color: #F1F3F5 !important;
   border-radius: 6px !important;
 }
 input:focus, select:focus, textarea:focus {
-  border-color: #238636 !important;
+  border-color: #34D399 !important;
   outline: none !important;
-  box-shadow: 0 0 0 1px #238636 !important;
+  box-shadow: 0 0 0 1px #34D399 !important;
 }
 ::placeholder, [placeholder] {
-  color: #8B949E !important;
-  opacity: 0.6;
+  color: #A6A7AB !important;
+  opacity: 0.7;
 }
 
 /* Buttons styling */
 button.bg-slate-900, button.bg-indigo-600, button.bg-indigo-700, .btn-primary {
-  background-color: #238636 !important;
+  background-color: #2ea043 !important;
   color: #FFFFFF !important;
   border: none !important;
   border-radius: 6px !important;
@@ -151,65 +151,65 @@ button.bg-slate-900, button.bg-indigo-600, button.bg-indigo-700, .btn-primary {
   cursor: pointer !important;
 }
 button.bg-slate-900:hover, button.bg-indigo-600:hover, button.bg-indigo-700:hover, .btn-primary:hover {
-  background-color: #2ea043 !important;
+  background-color: #34D399 !important;
 }
 button.border-dashed {
-  background-color: rgba(35, 134, 54, 0.08) !important;
-  border-color: #238636 !important;
-  color: #C9D1D9 !important;
+  background-color: rgba(52, 211, 153, 0.08) !important;
+  border-color: #34D399 !important;
+  color: #D0D3D7 !important;
 }
 button.border-dashed:hover {
-  background-color: rgba(35, 134, 54, 0.15) !important;
-  border-color: #2ea043 !important;
+  background-color: rgba(52, 211, 153, 0.15) !important;
+  border-color: #34D399 !important;
 }
 
-/* Recharts Dark Theme Styling */
+/* Recharts Styling */
 .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line {
-  stroke: #30363D !important;
-  opacity: 0.5;
+  stroke: #42454E !important;
+  opacity: 0.6;
 }
 .recharts-text {
-  fill: #8B949E !important;
+  fill: #A6A7AB !important;
 }
 .recharts-default-tooltip {
-  background-color: #161B22 !important;
-  border: 1px solid #30363D !important;
+  background-color: #2E3036 !important;
+  border: 1px solid #42454E !important;
   border-radius: 6px !important;
 }
 .recharts-tooltip-item {
-  color: #C9D1D9 !important;
+  color: #F1F3F5 !important;
 }
 .recharts-legend-item-text {
-  color: #C9D1D9 !important;
+  color: #D0D3D7 !important;
 }
 
 /* Ensure accurate status badge coloring */
 .text-rose-600, .text-rose-700 {
-  color: #D73A49 !important;
+  color: #E05260 !important;
 }
 .text-emerald-700, .text-emerald-600 {
-  color: #238636 !important;
+  color: #34D399 !important;
 }
 .text-amber-600, .text-amber-700 {
-  color: #E3B341 !important;
+  color: #F59E0B !important;
 }
 
 .text-slate-950 {
-  color: #FFFFFF !important;
+  color: #F1F3F5 !important;
 }
 
 /* General Layout spacing */
 .main-layout {
-  background-color: #0B0E14;
+  background-color: #25262B;
 }
 
 /* Visualizer custom border */
 #visualizer-stage {
-  background: radial-gradient(circle at center, #1C212B 0%, #0B0E14 100%) !important;
-  border: 1px solid #30363D !important;
+  background: radial-gradient(circle at center, #35373F 0%, #25262B 100%) !important;
+  border: 1px solid #42454E !important;
 }
 
 /* Adjust timeline slider to match custom theme */
 #timeline-controls input[type="range"], [class*="accent-indigo-600"] {
-  accent-color: #238636 !important;
+  accent-color: #34D399 !important;
 }

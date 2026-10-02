@@ -187,8 +187,8 @@ function generateSvgPlot(
   const scale = 14.0;
   const svg_elements: string[] = [];
 
-  // Extended height viewBox to accommodate the beautiful inline legend at the bottom corner below colorbar
-  svg_elements.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-210 -200 420 620" width="100%" height="100%">');
+  // Compact, well-proportioned viewBox for pixel-perfect aspect ratio
+  svg_elements.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-210 -200 420 570" width="420" height="570">');
   
   svg_elements.push(`  <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -204,7 +204,7 @@ function generateSvgPlot(
     </linearGradient>
   </defs>`);
 
-  svg_elements.push('  <rect x="-210" y="-200" width="420" height="620" fill="none" />');
+  svg_elements.push('  <rect x="-210" y="-200" width="420" height="570" fill="none" />');
 
   domains_list.forEach((domain_id, idx) => {
     const domain_nodes = nodes_data.filter(n => String(n.domain_id) === domain_id).map(n => n.abbr);

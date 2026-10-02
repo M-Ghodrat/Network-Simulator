@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Domain, NodeIndicator, Edge, SavedNetworkConfig } from "../types";
+import { Domain, NodeIndicator, Edge, SavedNetworkConfig, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
 import { dataService } from "../dataService";
-import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award } from "lucide-react";
+import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award, Download, FileSpreadsheet, Image as ImageIcon } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { auth } from "../firebase";
 import { generateStaticNetworkSvg } from "../lib/simulationClient";
@@ -98,6 +98,8 @@ export default function ConfigPage() {
   const [domainForm, setDomainForm] = useState({ id: "", name: "" });
   const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
 
+  const [limits, setLimits] = useState<SimulationLimitsConfig>({ ...DEFAULT_SIMULATION_LIMITS });
+
   // CRUD Form States - Nodes
   const [nodeForm, setNodeForm] = useState({
     id: "",
@@ -133,6 +135,10 @@ export default function ConfigPage() {
       setLoading(false);
     });
 
+    const unsubLimits = dataService.subscribeLimits((l) => {
+      setLimits(l);
+    });
+
     const unsubStatus = dataService.subscribeStatus((localFlag) => {
       setIsLocal(localFlag);
     });
@@ -141,6 +147,7 @@ export default function ConfigPage() {
       unsubDomains();
       unsubNodes();
       unsubEdges();
+      unsubLimits();
       unsubStatus();
     };
   }, []);
@@ -303,6 +310,206 @@ export default function ConfigPage() {
   const showFeedback = (text: string, type: "success" | "error") => {
     setMessage({ text, type });
     setTimeout(() => setMessage(null), 5000);
+  };
+
+  // ==========================================
+  // CSV & IMAGE EXPORT HELPERS
+  // ==========================================
+  const downloadCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
+    const escapeCell = (val: string | number | undefined | null) => {
+      if (val === undefined || val === null) return '""';
+      const str = String(val);
+      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const csvContent = "\uFEFF" + [
+      headers.map(escapeCell).join(","),
+      ...rows.map(row => row.map(escapeCell).join(","))
+    ].join("\r\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showFeedback(`Exported ${filename} successfully!`, "success");
+  };
+
+  const exportNodesCSV = () => {
+    if (nodes.length === 0) {
+      showFeedback("No indicator nodes to export.", "error");
+      return;
+    }
+    const headers = ["Abbreviation", "Full Name", "Domain ID", "Domain Name", "Failure Threshold (theta)", "Passive Recovery (rv)"];
+    const rows = nodes.map(n => {
+      const dName = domains.find(d => d.id === n.domain_id)?.name || `Domain ${n.domain_id}`;
+      return [
+        n.abbr,
+        n.full_name,
+        n.domain_id,
+        dName,
+        n.theta ?? 0.2,
+        n.recovery_rate ?? 0.05
+      ];
+    });
+    downloadCSV(`ursa_indicators_registry_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
+
+  const exportEdgesCSV = () => {
+    if (edges.length === 0) {
+      showFeedback("No directed edges to export.", "error");
+      return;
+    }
+    const headers = ["Edge ID", "Source (u)", "Source Name", "Target (v)", "Target Name", "Connection Type", "Weight"];
+    const rows = edges.map(e => {
+      const sNode = nodes.find(n => n.abbr === e.source);
+      const tNode = nodes.find(n => n.abbr === e.target);
+      const isIntra = sNode && tNode && sNode.domain_id === tNode.domain_id;
+      return [
+        e.id,
+        e.source,
+        sNode?.full_name || "Unknown",
+        e.target,
+        tNode?.full_name || "Unknown",
+        isIntra ? "Intra-Domain" : "Inter-Domain",
+        e.weight ?? 1.0
+      ];
+    });
+    downloadCSV(`ursa_adjacency_edges_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
+
+  const exportDomainsCSV = () => {
+    if (domains.length === 0) {
+      showFeedback("No domains to export.", "error");
+      return;
+    }
+    const headers = ["Domain ID", "Domain Name", "Total Assigned Indicators"];
+    const rows = domains.map(d => {
+      const count = nodes.filter(n => n.domain_id === d.id).length;
+      return [d.id, d.name, count];
+    });
+    downloadCSV(`ursa_domains_registry_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
+
+  const exportMetricsCSV = () => {
+    if (filteredMetricsList.length === 0) {
+      showFeedback("No metrics rows to export.", "error");
+      return;
+    }
+    const headers = ["Indicator (Abbr)", "Full Name", "Domain ID", "Domain Name", "In-Degree Centrality", "Out-Degree Centrality", "Betweenness Centrality"];
+    const rows = filteredMetricsList.map(item => [
+      item.node.abbr,
+      item.node.full_name,
+      item.node.domain_id,
+      item.domainName,
+      item.inDegree,
+      item.outDegree,
+      Number(item.betweenness.toFixed(4))
+    ]);
+    downloadCSV(`ursa_network_centrality_metrics_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
+
+  const downloadNetworkMapSvg = () => {
+    if (nodes.length === 0) {
+      showFeedback("Cannot export map: network has no nodes.", "error");
+      return;
+    }
+    try {
+      const svgDataUri = generateStaticNetworkSvg(nodes, edges, domains);
+      const base64Index = svgDataUri.indexOf("base64,");
+      if (base64Index === -1) {
+        showFeedback("Failed to process SVG image.", "error");
+        return;
+      }
+      const svgText = decodeURIComponent(escape(atob(svgDataUri.substring(base64Index + 7))));
+      const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ursa_network_map_${new Date().toISOString().slice(0, 10)}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showFeedback("Network Map SVG downloaded successfully!", "success");
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Failed to download SVG: ${err?.message || err}`, "error");
+    }
+  };
+
+  const downloadNetworkMapPng = () => {
+    if (nodes.length === 0) {
+      showFeedback("Cannot export map: network has no nodes.", "error");
+      return;
+    }
+    try {
+      const svgDataUri = generateStaticNetworkSvg(nodes, edges, domains);
+      const img = new Image();
+      img.onload = () => {
+        const baseWidth = img.naturalWidth || 420;
+        const baseHeight = img.naturalHeight || 570;
+        const scaleFactor = 3; // 3x high-resolution rendering
+        const width = baseWidth * scaleFactor;
+        const height = baseHeight * scaleFactor;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          showFeedback("Failed to generate image canvas.", "error");
+          return;
+        }
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const pngUrl = canvas.toDataURL("image/png");
+        const link = document.createElement("a");
+        link.href = pngUrl;
+        link.download = `ursa_network_map_${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showFeedback("Network Map PNG downloaded successfully!", "success");
+      };
+      img.onerror = () => {
+        showFeedback("Failed to render raster PNG from map SVG.", "error");
+      };
+      img.src = svgDataUri;
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Failed to download PNG: ${err?.message || err}`, "error");
+    }
+  };
+
+  // Helper to trigger export based on active tab
+  const handleActiveTabExport = () => {
+    switch (activeTab) {
+      case "nodes":
+        exportNodesCSV();
+        break;
+      case "edges":
+        exportEdgesCSV();
+        break;
+      case "domains":
+        exportDomainsCSV();
+        break;
+      case "metrics":
+        exportMetricsCSV();
+        break;
+      case "network":
+        downloadNetworkMapPng();
+        break;
+    }
   };
 
   // Seeding Function (One-time default network seed)
@@ -647,6 +854,16 @@ export default function ConfigPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           <button
+            onClick={handleActiveTabExport}
+            disabled={loading}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+            id="export-active-tab-btn"
+            title="Export current tab data as CSV / Image"
+          >
+            {activeTab === "network" ? <ImageIcon size={13} /> : <FileSpreadsheet size={13} />}
+            {activeTab === "network" ? "Export Map (PNG)" : `Export ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} (CSV)`}
+          </button>
+          <button
             onClick={handleClearNetwork}
             disabled={loading}
             className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
@@ -825,8 +1042,16 @@ export default function ConfigPage() {
 
               {/* Domains list */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
+                <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Domain Registry</h3>
+                  <button
+                    onClick={exportDomainsCSV}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-md transition-colors shadow-2xs cursor-pointer"
+                    title="Download domains as CSV file"
+                  >
+                    <FileSpreadsheet size={13} className="text-emerald-600" />
+                    <span>Export CSV</span>
+                  </button>
                 </div>
                 <div className="divide-y divide-slate-100 text-xs">
                   {domains.length === 0 ? (
@@ -915,35 +1140,35 @@ export default function ConfigPage() {
                     <div className="p-3 bg-slate-50/50 border border-slate-200 rounded-lg space-y-2">
                       <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
                         <span>Failure Threshold (θ_v)</span>
-                        <span className="font-bold text-slate-800">{Number(nodeForm.theta).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">{Number(nodeForm.theta).toFixed(limits.theta.step < 0.01 ? 3 : 2)}</span>
                       </div>
                       <input
                         type="range"
-                        min="0.00"
-                        max="0.40"
-                        step="0.01"
-                        value={Math.min(0.40, Math.max(0.00, Number(nodeForm.theta)))}
+                        min={limits.theta.min}
+                        max={limits.theta.max}
+                        step={limits.theta.step}
+                        value={Math.min(limits.theta.max, Math.max(limits.theta.min, Number(nodeForm.theta)))}
                         onChange={(e) => setNodeForm({ ...nodeForm, theta: Number(e.target.value) })}
                         className="w-full accent-slate-900"
                       />
-                      <p className="text-[10px] text-slate-400">Incoming degradation above this threshold (0.00 – 0.40) causes node stability decline.</p>
+                      <p className="text-[10px] text-slate-400">Incoming degradation above this threshold ({limits.theta.min.toFixed(2)} – {limits.theta.max.toFixed(2)}) causes node stability decline.</p>
                     </div>
 
                     <div className="p-3 bg-slate-50/50 border border-slate-200 rounded-lg space-y-2">
                       <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
                         <span>Passive Recovery Rate (r_v)</span>
-                        <span className="font-bold text-slate-800">{Number(nodeForm.recovery_rate).toFixed(3)}</span>
+                        <span className="font-bold text-slate-800">{Number(nodeForm.recovery_rate).toFixed(limits.rv.step < 0.01 ? 3 : 2)}</span>
                       </div>
                       <input
                         type="range"
-                        min="0.00"
-                        max="0.10"
-                        step="0.005"
-                        value={Math.min(0.10, Math.max(0.00, Number(nodeForm.recovery_rate)))}
+                        min={limits.rv.min}
+                        max={limits.rv.max}
+                        step={limits.rv.step}
+                        value={Math.min(limits.rv.max, Math.max(limits.rv.min, Number(nodeForm.recovery_rate)))}
                         onChange={(e) => setNodeForm({ ...nodeForm, recovery_rate: Number(e.target.value) })}
                         className="w-full accent-slate-900"
                       />
-                      <p className="text-[10px] text-slate-400">Recovery added to stability at each wave (0.000 – 0.100).</p>
+                      <p className="text-[10px] text-slate-400">Recovery added to stability at each wave ({limits.rv.min.toFixed(3)} – {limits.rv.max.toFixed(3)}).</p>
                     </div>
                   </div>
 
@@ -980,11 +1205,14 @@ export default function ConfigPage() {
               {/* Indicator registry table */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden space-y-4 p-5">
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider self-start sm:self-center">Indicator Registry</h3>
+                  <div className="flex items-center gap-3 self-start sm:self-center">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Indicator Registry</h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">{filteredNodes.length} nodes</span>
+                  </div>
                   
-                  {/* Filters */}
+                  {/* Filters & Export */}
                   <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center">
-                    <div className="relative w-full sm:w-48">
+                    <div className="relative w-full sm:w-44">
                       <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
                       <input
                         type="text"
@@ -1004,6 +1232,14 @@ export default function ConfigPage() {
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
+                    <button
+                      onClick={exportNodesCSV}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors shadow-2xs cursor-pointer ml-auto sm:ml-0"
+                      title="Download indicator registry as CSV file"
+                    >
+                      <FileSpreadsheet size={13} className="text-emerald-600" />
+                      <span>Export CSV</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1137,16 +1373,29 @@ export default function ConfigPage() {
               {/* Edges list table */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden space-y-4 p-5">
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider self-start sm:self-center">Adjacency Edges List</h3>
-                  <div className="relative w-full sm:w-64">
-                    <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={edgeSearch}
-                      onChange={(e) => setEdgeSearch(e.target.value)}
-                      placeholder="Filter edges by node abbreviation/name..."
-                      className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
-                    />
+                  <div className="flex items-center gap-3 self-start sm:self-center">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Adjacency Edges List</h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">{filteredEdges.length} edges</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center">
+                    <div className="relative w-full sm:w-56">
+                      <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={edgeSearch}
+                        onChange={(e) => setEdgeSearch(e.target.value)}
+                        placeholder="Filter edges by node..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={exportEdgesCSV}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors shadow-2xs cursor-pointer ml-auto sm:ml-0"
+                      title="Download edges adjacency list as CSV file"
+                    >
+                      <FileSpreadsheet size={13} className="text-emerald-600" />
+                      <span>Export CSV</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1213,7 +1462,7 @@ export default function ConfigPage() {
           {!loading && activeTab === "network" && (
             <div className="space-y-6 animate-fade-in" id="network-tab">
               <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
                   <div className="space-y-0.5">
                     <h3 className="text-sm font-bold text-slate-900 font-sans">
                       Resilience Network Architecture Map
@@ -1222,8 +1471,8 @@ export default function ConfigPage() {
                       Static visualization of domains, indicator nodes, and inter-indicator influence paths.
                     </p>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
                       <span className="font-semibold tracking-wider uppercase">Zoom</span>
                       <input
                         type="range"
@@ -1232,10 +1481,26 @@ export default function ConfigPage() {
                         step="10"
                         value={networkScale}
                         onChange={(e) => setNetworkScale(Number(e.target.value))}
-                        className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                        className="w-20 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                       />
                       <span className="w-8 text-right">{networkScale}%</span>
                     </div>
+                    <button
+                      onClick={downloadNetworkMapPng}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors shadow-2xs cursor-pointer"
+                      title="Save network map as PNG image"
+                    >
+                      <ImageIcon size={13} className="text-indigo-600" />
+                      <span>Save PNG</span>
+                    </button>
+                    <button
+                      onClick={downloadNetworkMapSvg}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors shadow-2xs cursor-pointer"
+                      title="Save network map as vector SVG file"
+                    >
+                      <Download size={13} className="text-emerald-600" />
+                      <span>Save SVG</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1474,12 +1739,22 @@ export default function ConfigPage() {
               {/* Table / Grid */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                 <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold">
-                    Indicator Centrality Metrics ({filteredMetricsList.length} shown)
-                  </span>
-                  <span className="text-[9px] font-mono text-slate-400">
-                    Click column headers to sort. Double click to toggle direction.
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold">
+                      Indicator Centrality Metrics ({filteredMetricsList.length} shown)
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400 hidden md:inline">
+                      • Click column headers to sort
+                    </span>
+                  </div>
+                  <button
+                    onClick={exportMetricsCSV}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-md transition-colors shadow-2xs cursor-pointer self-start sm:self-auto"
+                    title="Export metrics table as CSV"
+                  >
+                    <FileSpreadsheet size={13} className="text-emerald-600" />
+                    <span>Export Metrics (CSV)</span>
+                  </button>
                 </div>
 
                 {filteredMetricsList.length === 0 ? (
