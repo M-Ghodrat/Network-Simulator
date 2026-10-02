@@ -505,9 +505,6 @@ export default function LearnPage({ isAdmin = false }: LearnPageProps) {
               <span className="font-bold text-sm text-[#F1F3F5] tracking-tight">
                 URSA Graph & Network Dictionary
               </span>
-              <span className="text-xs text-[#A6A7AB] font-mono hidden md:inline">
-                • 15 foundational topological definitions & equations
-              </span>
             </div>
 
             <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -724,14 +721,14 @@ export default function LearnPage({ isAdmin = false }: LearnPageProps) {
               URSA Network Centrality & Structural Metrics
             </span>
             <span className="text-xs text-[#A6A7AB] font-mono hidden xl:inline">
-              • 10 topological formulations
+              • Topological formulations & metrics
             </span>
           </div>
 
           {/* Compact Filter Pills: guaranteed 100% visible on all viewports */}
           <div className="flex items-center gap-1 bg-[#1E1F23] p-1 rounded-xl border border-[#42454E] shrink-0 flex-wrap">
             {[
-              { id: "all", label: "All", tip: "All 10 Topological & Centrality Metrics" },
+              { id: "all", label: "All", tip: "All Topological & Centrality Metrics" },
               { id: "degree", label: "Degree", tip: "In-Degree & Out-Degree Centrality" },
               { id: "path", label: "Paths", tip: "Betweenness & Closeness Centrality" },
               { id: "eigen", label: "Spectral", tip: "Eigenvector, PageRank, Katz & HITS Centrality" },

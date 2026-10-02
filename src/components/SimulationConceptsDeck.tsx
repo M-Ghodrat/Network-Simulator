@@ -627,7 +627,7 @@ export default function SimulationConceptsDeck({
               }`}
             >
               <LayoutGrid size={13} className={viewMode === "all" ? "text-[#6C8CFF]" : ""} />
-              <span>All 10 Concepts</span>
+              <span>All Concepts</span>
             </button>
           </div>
 

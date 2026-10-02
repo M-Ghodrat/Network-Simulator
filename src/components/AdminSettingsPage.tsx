@@ -137,30 +137,45 @@ export default function AdminSettingsPage() {
     setUserFormError(null);
     setUserFormSuccess(null);
 
-    const cleanUsername = newUsername.trim().toLowerCase();
-    if (!cleanUsername) {
-      setUserFormError("Username is required.");
+    const validation = dataService.validateUsername(newUsername);
+    if (!validation.valid) {
+      setUserFormError(validation.error || "Please enter a valid unique username.");
       return;
     }
+    const cleanUsername = validation.clean;
 
     if (!newPassword.trim()) {
       setUserFormError("Password is required.");
       return;
     }
 
+    if (newPassword.trim().length < 4) {
+      setUserFormError("Password must be at least 4 characters.");
+      return;
+    }
+
+    const isRepeated = accounts.some(
+      (a) => a.username.toLowerCase() === cleanUsername || a.id.toLowerCase() === cleanUsername
+    );
+
     setIsSubmittingUser(true);
     try {
       if (newRole === "admin") {
-        await dataService.createUserAccount({
+        const result = await dataService.createUserAccount({
           id: cleanUsername,
           username: cleanUsername,
           password: newPassword.trim(),
           role: "admin"
-        });
-        setUserFormSuccess(`Administrator '${cleanUsername}' created successfully (no term assignment needed).`);
+        }, true);
+        
+        if (result.overwritten || isRepeated) {
+          setUserFormSuccess(`⚠️ Warning: Administrator '${cleanUsername}' already existed. Existing account has been updated with the new credentials.`);
+        } else {
+          setUserFormSuccess(`Administrator '${cleanUsername}' created successfully.`);
+        }
       } else {
         const calculatedTerm = `${newSeason} ${newYear}`;
-        await dataService.createUserAccount({
+        const result = await dataService.createUserAccount({
           id: cleanUsername,
           username: cleanUsername,
           password: newPassword.trim(),
@@ -168,13 +183,18 @@ export default function AdminSettingsPage() {
           season: newSeason,
           year: newYear,
           role: "user"
-        });
-        setUserFormSuccess(`User '${cleanUsername}' assigned to term '${calculatedTerm}' created successfully!`);
+        }, true);
+
+        if (result.overwritten || isRepeated) {
+          setUserFormSuccess(`⚠️ Warning: Account '${cleanUsername}' was already registered. Updated account with term '${calculatedTerm}'.`);
+        } else {
+          setUserFormSuccess(`User '${cleanUsername}' registered for term '${calculatedTerm}'.`);
+        }
       }
 
       setNewUsername("");
       setNewPassword("");
-      setTimeout(() => setUserFormSuccess(null), 4500);
+      setTimeout(() => setUserFormSuccess(null), 6000);
     } catch (err: any) {
       setUserFormError(err.message || "Failed to create user account.");
     } finally {
@@ -348,7 +368,7 @@ export default function AdminSettingsPage() {
       subtitle: "Graph fundamentals & formal mathematical definitions",
       icon: BookOpen,
       color: "text-blue-400",
-      countBadge: "15 Definitions",
+      countBadge: "Theory & Definitions",
       description: "Foundational graph theory entities: Graph G=(V,E), Vertices, Directed Links, Adjacency Matrix, Degree Distributions, Density, and Topological Foundations.",
       topics: ["Graph G=(V,E)", "Vertices & Capacity", "Directed Coupling Edges", "Adjacency Matrix", "Density & Diameter"]
     },
@@ -358,17 +378,17 @@ export default function AdminSettingsPage() {
       subtitle: "Topological metrics & network structural formulas",
       icon: TrendingUp,
       color: "text-indigo-400",
-      countBadge: "10 Metrics",
+      countBadge: "Structural Metrics",
       description: "Structural metric calculators: In-Degree, Out-Degree, Betweenness Centrality, Closeness, Eigenvector Centrality, PageRank, Clustering Coefficient, and Modularity.",
       topics: ["In / Out Degree", "Betweenness Centrality", "Closeness Centrality", "PageRank Vector", "Clustering & Modularity"]
     },
     {
       key: "simulation_concepts",
       title: "Simulation Concepts",
-      subtitle: "URSA 9-stage cascade dynamic mechanics",
+      subtitle: "URSA cascade dynamic mechanics",
       icon: Cpu,
       color: "text-sky-400",
-      countBadge: "9 Core Mechanics",
+      countBadge: "Core Mechanics",
       description: "Cascade progression engine: Shock Perturbation (δv), Simulation Waves (t), Failure Threshold (θv), Centrality Dampening (γ), Autonomous Recovery (rv), Tolerance (ε), and Targeted Intervention (iv).",
       topics: ["Shock Perturbation δv", "Wave Horizon (t...T)", "Failure Threshold θv", "Dampening Exponent γ", "Targeted Intervention iv"]
     },
@@ -378,7 +398,7 @@ export default function AdminSettingsPage() {
       subtitle: "Multimedia video demonstrations & animated visual lectures",
       icon: PlayCircle,
       color: "text-rose-400",
-      countBadge: "3 Video Lectures",
+      countBadge: "Video Lectures",
       description: "Video lecture modules with audio demonstrations explaining Betweenness Centrality, In-Degree Centrality, and Out-Degree Centrality propagation.",
       topics: ["Betweenness Centrality", "In-Degree Centrality", "Out-Degree Centrality"]
     },
@@ -583,17 +603,33 @@ export default function AdminSettingsPage() {
             <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
               {/* Username */}
               <div className="md:col-span-3 space-y-1.5">
-                <label className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#A6A7AB]">
-                  Username
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#A6A7AB]">
+                    Username
+                  </label>
+                  {newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase()) && (
+                    <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
+                      ⚠️ Existing Username
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
                   placeholder="e.g. student4, user4"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-[#1E1F23] border border-[#42454E] rounded-lg text-[#F1F3F5] placeholder:text-[#A6A7AB] focus:outline-hidden focus:ring-2 focus:ring-[#5C9EE8]"
+                  className={`w-full px-3 py-2 text-xs bg-[#1E1F23] border rounded-lg text-[#F1F3F5] placeholder:text-[#A6A7AB] focus:outline-hidden focus:ring-2 ${
+                    newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase())
+                      ? "border-amber-500/70 focus:ring-amber-500"
+                      : "border-[#42454E] focus:ring-[#5C9EE8]"
+                  }`}
                 />
+                {newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase()) && (
+                  <p className="text-[10px] text-amber-300/90 leading-tight">
+                    Notice: An account with this username already exists. Submitting will update its credentials and term.
+                  </p>
+                )}
               </div>
 
               {/* Password */}

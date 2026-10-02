@@ -817,16 +817,19 @@ export default function ConfigPage() {
            tName.toLowerCase().includes(query);
   });
 
-  const emailPrefix = currentUser?.email ? currentUser.email.split("@")[0].toLowerCase() : "";
+  const currentUserName = dataService.getCurrentUserName();
+  const activeUserKey = currentUser?.userName || (currentUserName !== "global" ? currentUserName : (currentUser?.email ? currentUser.email.split("@")[0].toLowerCase() : ""));
   let modeSuffix = "";
-  if (emailPrefix === "user1") {
+  if (activeUserKey === "user1") {
     modeSuffix = " (Mode A)";
-  } else if (emailPrefix === "user2") {
+  } else if (activeUserKey === "user2") {
     modeSuffix = " (Mode B)";
-  } else if (emailPrefix === "user3") {
+  } else if (activeUserKey === "user3") {
     modeSuffix = " (Mode C)";
-  } else if (emailPrefix === "admin") {
-    modeSuffix = " (URSA)";
+  } else if (activeUserKey === "admin") {
+    modeSuffix = " (URSA Admin)";
+  } else if (activeUserKey) {
+    modeSuffix = ` (${activeUserKey})`;
   }
 
   return (

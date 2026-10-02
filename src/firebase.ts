@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, doc, getDocFromServer } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCRoDhqGX1JRBn11HRv8vbCfAUrJ5zFa1k",
@@ -18,3 +18,15 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 // Use the custom database ID from the config
 export const db = getFirestore(app, "ai-studio-ursaurbanresilie-61980384-3819-42c3-98f9-4cf877b5e76e");
+
+// Test Firestore connection on boot as mandated by Firebase skill
+async function testFirestoreConnection() {
+  try {
+    await getDocFromServer(doc(db, "system", "connection_probe"));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("the client is offline")) {
+      console.warn("Firestore client is offline or network restricted.");
+    }
+  }
+}
+testFirestoreConnection();

@@ -70,28 +70,63 @@
         "params": { "$ref": "#/definitions/SimulatorParams", "description": "Associated simulation parameters" }
       },
       "required": ["name", "savedAt", "domains", "nodes", "edges", "params"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account and metadata mapped to unique username",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique username identifier" },
+        "userName": { "type": "string", "description": "Unique username identifier" },
+        "name": { "type": "string", "description": "User name" },
+        "email": { "type": "string", "description": "User email address" },
+        "role": { "type": "string", "description": "Role: user or admin" },
+        "term": { "type": "string", "description": "Academic term" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "userName", "role"]
     }
   },
   "firestore": {
+    "users/{userName}": {
+      "schema": "UserProfile",
+      "description": "User account profile mapped to unique username"
+    },
+    "users/{userName}/domains/{domainId}": {
+      "schema": "Dimension",
+      "description": "The user-specific resilience domains"
+    },
+    "users/{userName}/nodes/{nodeId}": {
+      "schema": "NodeIndicator",
+      "description": "The user-specific network nodes"
+    },
+    "users/{userName}/edges/{edgeId}": {
+      "schema": "Edge",
+      "description": "The user-specific directed network edges"
+    },
+    "users/{userName}/params/{paramId}": {
+      "schema": "SimulatorParams",
+      "description": "The user-specific simulation parameters"
+    },
+    "users/{userName}/saved_config/{configId}": {
+      "schema": "SavedNetworkConfig",
+      "description": "User's saved backup slots for custom network layouts"
+    },
     "domains/{domainId}": {
       "schema": "Dimension",
-      "description": "The resilience domains"
+      "description": "The global resilience domains"
     },
     "nodes/{nodeId}": {
       "schema": "NodeIndicator",
-      "description": "The network nodes"
+      "description": "The global network nodes"
     },
     "edges/{edgeId}": {
       "schema": "Edge",
-      "description": "The directed network edges"
+      "description": "The global directed network edges"
     },
     "params/{paramId}": {
       "schema": "SimulatorParams",
-      "description": "Persistent simulation parameter profiles"
-    },
-    "users/{userId}/saved_config/{configId}": {
-      "schema": "SavedNetworkConfig",
-      "description": "User's single backup slot for custom network layouts"
+      "description": "The global simulation parameter profiles"
     }
   }
 }

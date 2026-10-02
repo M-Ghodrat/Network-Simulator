@@ -76,29 +76,30 @@ export default function App() {
     );
   }
 
-  const emailPrefix = user?.email ? user.email.split("@")[0].toLowerCase() : "";
-  const isAdmin = emailPrefix === "admin" || (user?.email && user.email.toLowerCase().includes("admin")) || false;
+  const currentUserName = dataService.getCurrentUserName();
+  const activeUserKey = user?.userName || (currentUserName !== "global" ? currentUserName : (user?.email ? user.email.split("@")[0].toLowerCase() : ""));
+  const isAdmin = activeUserKey === "admin" || (user?.email && user.email.toLowerCase().includes("admin")) || false;
   let userDisplayName = "User";
   let modeDisplayName = "Mode A";
 
-  if (emailPrefix === "user1") {
+  if (activeUserKey === "user1") {
     userDisplayName = "User 1";
     modeDisplayName = "Mode A";
-  } else if (emailPrefix === "user2") {
+  } else if (activeUserKey === "user2") {
     userDisplayName = "User 2";
     modeDisplayName = "Mode B";
-  } else if (emailPrefix === "user3") {
+  } else if (activeUserKey === "user3") {
     userDisplayName = "User 3";
     modeDisplayName = "Mode C";
-  } else if (emailPrefix === "admin") {
+  } else if (activeUserKey === "admin") {
     userDisplayName = "Admin";
     modeDisplayName = "Mode Admin";
-  } else if (emailPrefix) {
-    userDisplayName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
-    modeDisplayName = "Mode Default";
+  } else if (activeUserKey) {
+    userDisplayName = activeUserKey.charAt(0).toUpperCase() + activeUserKey.slice(1);
+    modeDisplayName = `Workspace: ${activeUserKey}`;
   }
 
-  const userAccount = dataService.getAccountByUsername(emailPrefix);
+  const userAccount = dataService.getAccountByUsername(activeUserKey);
   const userTerm = userAccount?.term || user?.term || "Summer 2026";
 
   return (
