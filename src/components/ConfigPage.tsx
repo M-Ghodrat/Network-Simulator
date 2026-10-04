@@ -818,7 +818,7 @@ export default function ConfigPage() {
   });
 
   const currentUserName = dataService.getCurrentUserName();
-  const activeUserKey = currentUser?.userName || (currentUserName !== "global" ? currentUserName : (currentUser?.email ? currentUser.email.split("@")[0].toLowerCase() : ""));
+  const activeUserKey = currentUser?.userName || (currentUserName !== "global" ? currentUserName : (currentUser?.email ? currentUser.email : ""));
   let modeSuffix = "";
   if (activeUserKey === "user1") {
     modeSuffix = " (Mode A)";

@@ -77,8 +77,13 @@ export default function App() {
   }
 
   const currentUserName = dataService.getCurrentUserName();
-  const activeUserKey = user?.userName || (currentUserName !== "global" ? currentUserName : (user?.email ? user.email.split("@")[0].toLowerCase() : ""));
-  const isAdmin = activeUserKey === "admin" || (user?.email && user.email.toLowerCase().includes("admin")) || false;
+  const activeUserKey = user?.userName || (currentUserName !== "global" ? currentUserName : (user?.email ? user.email : ""));
+  const isAdmin = 
+    activeUserKey.toLowerCase() === "admin" || 
+    user?.role === "admin" || 
+    dataService.isCurrentUserAdmin() || 
+    (user?.email && user.email.toLowerCase().includes("admin")) || 
+    false;
   let userDisplayName = "User";
   let modeDisplayName = "Mode A";
 

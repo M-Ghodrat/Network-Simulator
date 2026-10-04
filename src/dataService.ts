@@ -89,30 +89,33 @@ class DataService {
   // --- Unique Username Helpers & Validation ---
 
   /**
-   * Returns the clean, lowercase unique username for the current active user.
+   * Returns the clean unique username for the current active user.
    * Guarantees all data (domains, nodes, edges, params, configs) maps directly to this user name.
    */
   public getCurrentUserName(): string {
     if (!this.currentUser) return "global";
     if (this.currentUser.userName && typeof this.currentUser.userName === "string") {
-      return this.currentUser.userName.trim().toLowerCase();
+      return this.currentUser.userName.trim();
     }
     if (this.currentUser.username && typeof this.currentUser.username === "string") {
-      return this.currentUser.username.trim().toLowerCase();
+      return this.currentUser.username.trim();
     }
     if (this.currentUser.email && typeof this.currentUser.email === "string") {
-      const prefix = this.currentUser.email.split("@")[0].trim().toLowerCase();
-      if (prefix) return prefix;
+      const email = this.currentUser.email.trim();
+      if (email.endsWith("@network.org")) {
+        return email.replace(/@network\.org$/, "");
+      }
+      return email;
     }
     if (typeof this.currentUser.uid === "string") {
-      const cleaned = this.currentUser.uid.replace(/^local-/, "").trim().toLowerCase();
+      const cleaned = this.currentUser.uid.replace(/^local-/, "").trim();
       if (cleaned) return cleaned;
     }
     return "default_user";
   }
 
   public isCurrentUserAdmin(): boolean {
-    const userName = this.getCurrentUserName();
+    const userName = this.getCurrentUserName().toLowerCase();
     if (userName === "admin") return true;
     if (this.currentUser?.role === "admin") return true;
     const account = this.getAccountByUsername(userName);
@@ -122,21 +125,22 @@ class DataService {
   }
 
   /**
-   * Validates format constraints for usernames: 3-30 chars, alphanumeric with hyphens/underscores.
+   * Validates format constraints for usernames.
+   * Supports arbitrary usernames including '.', '@', and special characters.
    */
   public validateUsername(rawUsername: string): { valid: boolean; clean: string; error?: string } {
-    const clean = (rawUsername || "").trim().toLowerCase();
+    const clean = (rawUsername || "").trim();
     if (!clean) {
       return { valid: false, clean: "", error: "Username cannot be empty." };
     }
-    if (clean.length < 3) {
-      return { valid: false, clean, error: "Username must be at least 3 characters long." };
+    if (clean.includes("/")) {
+      return { valid: false, clean, error: "Username cannot contain forward slashes ('/')." };
     }
-    if (clean.length > 30) {
-      return { valid: false, clean, error: "Username cannot exceed 30 characters." };
+    if (clean === "." || clean === "..") {
+      return { valid: false, clean, error: "Username cannot be only dots ('.' or '..')." };
     }
-    if (!/^[a-z0-9_-]+$/.test(clean)) {
-      return { valid: false, clean, error: "Username may only contain letters, numbers, underscores, and hyphens." };
+    if (/^__.*__$/.test(clean)) {
+      return { valid: false, clean, error: "Username cannot use reserved system format (__...__)." };
     }
     return { valid: true, clean };
   }
@@ -145,12 +149,13 @@ class DataService {
    * Checks both local accounts state and Firestore database to verify if a username is already taken.
    */
   public async isUsernameTaken(rawUsername: string): Promise<boolean> {
-    const clean = (rawUsername || "").trim().toLowerCase();
-    if (!clean) return false;
+    const raw = (rawUsername || "").trim();
+    if (!raw) return false;
+    const clean = raw.toLowerCase();
 
     // Check in-memory / local storage accounts
     const inLocal = this.accounts.some(
-      (a) => a.id.toLowerCase() === clean || a.username.toLowerCase() === clean
+      (a) => a.id.toLowerCase() === clean || a.username.toLowerCase() === clean || a.id === raw || a.username === raw
     );
     if (inLocal) return true;
 
@@ -159,13 +164,22 @@ class DataService {
       const userSnap = await getDoc(doc(db, "users", clean));
       if (userSnap.exists()) return true;
 
+      if (raw !== clean) {
+        const rawSnap = await getDoc(doc(db, "users", raw));
+        if (rawSnap.exists()) return true;
+      }
+
       // Check system/user_accounts document
       const systemAccountsSnap = await getDoc(doc(db, "system", "user_accounts"));
       if (systemAccountsSnap.exists()) {
         const data = systemAccountsSnap.data();
         if (data?.accounts && Array.isArray(data.accounts)) {
           const inRemote = data.accounts.some(
-            (a: AppUserAccount) => a.id?.toLowerCase() === clean || a.username?.toLowerCase() === clean
+            (a: AppUserAccount) =>
+              a.id?.toLowerCase() === clean ||
+              a.username?.toLowerCase() === clean ||
+              a.id === raw ||
+              a.username === raw
           );
           if (inRemote) return true;
         }
@@ -254,10 +268,15 @@ class DataService {
   }
 
   public getAccountByUsername(username: string): AppUserAccount | undefined {
-    const raw = (username || "").trim().toLowerCase();
-    const clean = raw.includes("@") ? raw.split("@")[0].trim().toLowerCase() : raw;
+    const raw = (username || "").trim();
+    if (!raw) return undefined;
+    const clean = raw.toLowerCase();
     return this.accounts.find(
-      (a) => a.username.toLowerCase() === clean || a.id.toLowerCase() === clean || a.username.toLowerCase() === raw || a.id.toLowerCase() === raw
+      (a) =>
+        a.id.toLowerCase() === clean ||
+        a.username.toLowerCase() === clean ||
+        a.id === raw ||
+        a.username === raw
     );
   }
 
@@ -265,28 +284,49 @@ class DataService {
    * Async account finder that searches memory, default accounts, and Firestore.
    */
   public async findAccountAsync(usernameOrEmail: string): Promise<AppUserAccount | undefined> {
-    const raw = (usernameOrEmail || "").trim().toLowerCase();
-    const clean = raw.includes("@") ? raw.split("@")[0].trim().toLowerCase() : raw;
+    const raw = (usernameOrEmail || "").trim();
+    if (!raw) return undefined;
+    const clean = raw.toLowerCase();
 
-    // 1. Check local/in-memory accounts
-    const foundLocal = this.getAccountByUsername(clean);
+    // 1. Check local/in-memory accounts (exact raw or lowercase match)
+    const foundLocal = this.accounts.find(
+      (a) =>
+        a.id.toLowerCase() === clean ||
+        a.username.toLowerCase() === clean ||
+        a.id === raw ||
+        a.username === raw
+    );
     if (foundLocal) return foundLocal;
 
-    // 2. Check defaults
+    // 2. Also check if raw is an email and someone registered just the prefix or vice-versa
+    if (clean.includes("@")) {
+      const prefix = clean.split("@")[0];
+      const foundPrefix = this.accounts.find(
+        (a) => a.username.toLowerCase() === prefix || a.id.toLowerCase() === prefix
+      );
+      if (foundPrefix) return foundPrefix;
+    }
+
+    // 3. Check defaults
     const foundDefault = DEFAULT_USER_ACCOUNTS.find(
       (a) => a.username.toLowerCase() === clean || a.id.toLowerCase() === clean
     );
     if (foundDefault) return foundDefault;
 
-    // 3. Query Firestore users/{clean}
+    // 4. Query Firestore users/{clean} or users/{raw}
     try {
-      const userSnap = await getDoc(doc(db, "users", clean));
+      let userSnap = await getDoc(doc(db, "users", clean));
+      let docIdToUse = clean;
+      if (!userSnap.exists() && raw !== clean) {
+        userSnap = await getDoc(doc(db, "users", raw));
+        docIdToUse = raw;
+      }
       if (userSnap.exists()) {
         const data = userSnap.data();
         const acc: AppUserAccount = {
-          id: clean,
-          username: data.username || data.userName || clean,
-          password: data.password || clean,
+          id: docIdToUse,
+          username: data.username || data.userName || raw,
+          password: data.password || raw,
           role: data.role || (clean === "admin" ? "admin" : "user"),
           term: data.term || (data.role === "admin" ? undefined : "Summer 2026"),
           season: data.season || (data.role === "admin" ? undefined : "Summer"),
@@ -294,7 +334,7 @@ class DataService {
           createdAt: data.createdAt || new Date().toISOString()
         };
         // Cache in memory
-        if (!this.accounts.some((a) => a.id === clean)) {
+        if (!this.accounts.some((a) => a.id.toLowerCase() === docIdToUse.toLowerCase())) {
           this.accounts.push(acc);
           this.saveAccountsToLocalStorage();
           this.notifyAccountsListeners();
@@ -311,11 +351,14 @@ class DataService {
             (a: AppUserAccount) =>
               a.id?.toLowerCase() === clean ||
               a.username?.toLowerCase() === clean ||
-              a.id?.toLowerCase() === raw ||
-              a.username?.toLowerCase() === raw
+              a.id === raw ||
+              a.username === raw ||
+              (clean.includes("@") &&
+                (a.id?.toLowerCase() === clean.split("@")[0] ||
+                  a.username?.toLowerCase() === clean.split("@")[0]))
           );
           if (matched) {
-            if (!this.accounts.some((a) => a.id === matched.id)) {
+            if (!this.accounts.some((a) => a.id.toLowerCase() === matched.id.toLowerCase())) {
               this.accounts.push(matched);
               this.saveAccountsToLocalStorage();
               this.notifyAccountsListeners();
@@ -345,10 +388,11 @@ class DataService {
       throw new Error(validation.error || "Invalid username format.");
     }
     const clean = validation.clean;
+    const lookupKey = clean.toLowerCase();
 
     // Check if taken
     const existing = this.accounts.find(
-      (a) => a.id.toLowerCase() === clean || a.username.toLowerCase() === clean
+      (a) => a.id.toLowerCase() === lookupKey || a.username.toLowerCase() === lookupKey
     );
 
     let overwritten = false;
@@ -368,7 +412,7 @@ class DataService {
     };
 
     if (existing) {
-      this.accounts = this.accounts.map((a) => (a.id.toLowerCase() === clean ? newAccount : a));
+      this.accounts = this.accounts.map((a) => (a.id.toLowerCase() === lookupKey ? newAccount : a));
     } else {
       this.accounts = [...this.accounts, newAccount];
     }
@@ -390,7 +434,7 @@ class DataService {
         id: clean,
         userName: clean,
         name: clean,
-        email: `${clean}@network.org`,
+        email: clean.includes("@") ? clean : `${clean}@network.org`,
         displayName: clean.charAt(0).toUpperCase() + clean.slice(1),
         role: newAccount.role,
         term: newAccount.term || (newAccount.role === "admin" ? undefined : "Summer 2026"),
@@ -410,9 +454,10 @@ class DataService {
   }
 
   public async updateUserAccount(username: string, updates: Partial<AppUserAccount>): Promise<void> {
-    const clean = (username || "").trim().toLowerCase();
+    const raw = (username || "").trim();
+    const clean = raw.toLowerCase();
     this.accounts = this.accounts.map((a) => {
-      if (a.id === clean || a.username.toLowerCase() === clean) {
+      if (a.id.toLowerCase() === clean || a.username.toLowerCase() === clean || a.id === raw || a.username === raw) {
         return {
           ...a,
           ...updates,
@@ -426,27 +471,39 @@ class DataService {
 
     try {
       await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
-      await setDoc(doc(db, "users", clean), {
+      await setDoc(doc(db, "users", raw), {
         ...updates,
         updatedAt: new Date().toISOString()
       }, { merge: true });
+      if (raw !== clean) {
+        await setDoc(doc(db, "users", clean), {
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
     } catch (e) {
       console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
     }
   }
 
   public async deleteUserAccount(username: string): Promise<void> {
-    const clean = (username || "").trim().toLowerCase();
+    const raw = (username || "").trim();
+    const clean = raw.toLowerCase();
     if (clean === "admin") {
       throw new Error("Cannot delete primary administrator account.");
     }
-    this.accounts = this.accounts.filter((a) => a.id !== clean && a.username.toLowerCase() !== clean);
+    this.accounts = this.accounts.filter(
+      (a) => a.id.toLowerCase() !== clean && a.username.toLowerCase() !== clean && a.id !== raw && a.username !== raw
+    );
     this.notifyAccountsListeners();
     this.saveAccountsToLocalStorage();
 
     try {
       await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
-      await deleteDoc(doc(db, "users", clean));
+      await deleteDoc(doc(db, "users", raw));
+      if (raw !== clean) {
+        await deleteDoc(doc(db, "users", clean));
+      }
     } catch (e) {
       console.warn("Failed to delete user from Firestore:", e);
     }

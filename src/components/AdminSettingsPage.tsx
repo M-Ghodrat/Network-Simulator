@@ -139,7 +139,7 @@ export default function AdminSettingsPage() {
 
     const validation = dataService.validateUsername(newUsername);
     if (!validation.valid) {
-      setUserFormError(validation.error || "Please enter a valid unique username.");
+      setUserFormError(validation.error || "Please enter a valid username.");
       return;
     }
     const cleanUsername = validation.clean;
@@ -154,48 +154,63 @@ export default function AdminSettingsPage() {
       return;
     }
 
-    const isRepeated = accounts.some(
-      (a) => a.username.toLowerCase() === cleanUsername || a.id.toLowerCase() === cleanUsername
+    // Capture target payload before clearing
+    const targetUsername = cleanUsername;
+    const targetPassword = newPassword.trim();
+    const targetRole = newRole;
+    const targetSeason = newSeason;
+    const targetYear = newYear;
+
+    // Check if account genuinely existed prior to submission
+    const alreadyExisted = accounts.some(
+      (a) =>
+        a.username.toLowerCase() === targetUsername.toLowerCase() ||
+        a.id.toLowerCase() === targetUsername.toLowerCase()
     );
 
+    // Clear everything from the form immediately when hitting the add user button
+    setNewUsername("");
+    setNewPassword("");
     setIsSubmittingUser(true);
+
     try {
-      if (newRole === "admin") {
-        const result = await dataService.createUserAccount({
-          id: cleanUsername,
-          username: cleanUsername,
-          password: newPassword.trim(),
+      if (targetRole === "admin") {
+        await dataService.createUserAccount({
+          id: targetUsername,
+          username: targetUsername,
+          password: targetPassword,
           role: "admin"
         }, true);
         
-        if (result.overwritten || isRepeated) {
-          setUserFormSuccess(`⚠️ Warning: Administrator '${cleanUsername}' already existed. Existing account has been updated with the new credentials.`);
+        if (alreadyExisted) {
+          setUserFormSuccess(`Administrator '${targetUsername}' updated successfully.`);
         } else {
-          setUserFormSuccess(`Administrator '${cleanUsername}' created successfully.`);
+          setUserFormSuccess(`Administrator '${targetUsername}' created successfully.`);
         }
       } else {
-        const calculatedTerm = `${newSeason} ${newYear}`;
-        const result = await dataService.createUserAccount({
-          id: cleanUsername,
-          username: cleanUsername,
-          password: newPassword.trim(),
+        const calculatedTerm = `${targetSeason} ${targetYear}`;
+        await dataService.createUserAccount({
+          id: targetUsername,
+          username: targetUsername,
+          password: targetPassword,
           term: calculatedTerm,
-          season: newSeason,
-          year: newYear,
+          season: targetSeason,
+          year: targetYear,
           role: "user"
         }, true);
 
-        if (result.overwritten || isRepeated) {
-          setUserFormSuccess(`⚠️ Warning: Account '${cleanUsername}' was already registered. Updated account with term '${calculatedTerm}'.`);
+        if (alreadyExisted) {
+          setUserFormSuccess(`Account '${targetUsername}' updated with term '${calculatedTerm}'.`);
         } else {
-          setUserFormSuccess(`User '${cleanUsername}' registered for term '${calculatedTerm}'.`);
+          setUserFormSuccess(`User '${targetUsername}' registered successfully for term '${calculatedTerm}'.`);
         }
       }
 
-      setNewUsername("");
-      setNewPassword("");
-      setTimeout(() => setUserFormSuccess(null), 6000);
+      setTimeout(() => setUserFormSuccess(null), 5000);
     } catch (err: any) {
+      // Restore inputs on failure so admin does not lose entered data
+      setNewUsername(targetUsername);
+      setNewPassword(targetPassword);
       setUserFormError(err.message || "Failed to create user account.");
     } finally {
       setIsSubmittingUser(false);
@@ -603,33 +618,17 @@ export default function AdminSettingsPage() {
             <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
               {/* Username */}
               <div className="md:col-span-3 space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#A6A7AB]">
-                    Username
-                  </label>
-                  {newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase()) && (
-                    <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
-                      ⚠️ Existing Username
-                    </span>
-                  )}
-                </div>
+                <label className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#A6A7AB]">
+                  Username
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. student4, user4"
+                  placeholder="e.g. user.name@domain.com, student_4, admin_1"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs bg-[#1E1F23] border rounded-lg text-[#F1F3F5] placeholder:text-[#A6A7AB] focus:outline-hidden focus:ring-2 ${
-                    newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase())
-                      ? "border-amber-500/70 focus:ring-amber-500"
-                      : "border-[#42454E] focus:ring-[#5C9EE8]"
-                  }`}
+                  className="w-full px-3 py-2 text-xs bg-[#1E1F23] border border-[#42454E] rounded-lg text-[#F1F3F5] placeholder:text-[#A6A7AB] focus:outline-hidden focus:ring-2 focus:ring-[#5C9EE8]"
                 />
-                {newUsername.trim() && accounts.some(a => a.username.toLowerCase() === newUsername.trim().toLowerCase() || a.id.toLowerCase() === newUsername.trim().toLowerCase()) && (
-                  <p className="text-[10px] text-amber-300/90 leading-tight">
-                    Notice: An account with this username already exists. Submitting will update its credentials and term.
-                  </p>
-                )}
               </div>
 
               {/* Password */}
@@ -715,19 +714,34 @@ export default function AdminSettingsPage() {
                 </div>
               )}
 
-              {/* Submit Button */}
+              {/* Submit & Clear Buttons */}
               <div className="md:col-span-2 flex flex-col gap-1.5">
                 <div className="text-[10px] text-[#5C9EE8] font-mono font-bold truncate">
                   {newRole === "admin" ? "Role: Administrator" : `Term: ${newSeason} ${newYear}`}
                 </div>
-                <button
-                  type="submit"
-                  disabled={isSubmittingUser}
-                  className="w-full py-2 px-3 bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm border border-[#2ea043]/60"
-                >
-                  <UserPlus size={14} />
-                  <span>{isSubmittingUser ? "Creating..." : "Add User"}</span>
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingUser}
+                    className="flex-1 py-2 px-3 bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm border border-[#2ea043]/60"
+                  >
+                    <UserPlus size={14} />
+                    <span>{isSubmittingUser ? "Creating..." : "Add User"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUsername("");
+                      setNewPassword("");
+                      setUserFormError(null);
+                      setUserFormSuccess(null);
+                    }}
+                    className="py-2 px-2.5 bg-[#1E1F23] hover:bg-[#383A42] text-[#A6A7AB] hover:text-[#F1F3F5] text-xs font-semibold rounded-lg transition-all border border-[#42454E] cursor-pointer"
+                    title="Clear all fields"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -792,7 +806,7 @@ export default function AdminSettingsPage() {
                     return (
                       <tr key={account.id} className="hover:bg-[#383A42]/40 transition-colors">
                         {/* Username */}
-                        <td className="py-3 px-3 font-semibold text-[#F1F3F5] font-mono">
+                        <td className="py-3 px-3 font-semibold text-[#F1F3F5] font-mono break-all max-w-[220px]">
                           {account.username}
                         </td>
 

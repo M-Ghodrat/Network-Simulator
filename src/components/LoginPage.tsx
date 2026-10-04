@@ -28,17 +28,16 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
       // Find the account in dataService (supports sync and async Firestore checks)
       let account = await dataService.findAccountAsync(cleanInput);
 
-      // Extract clean username (strip email domain if entered)
-      const cleanUsername = cleanInput.includes("@")
-        ? cleanInput.split("@")[0].trim().toLowerCase()
-        : cleanInput.trim().toLowerCase();
+      // Extract clean username - prioritize matched account username/id, otherwise use input as typed
+      const cleanUsername = account?.username || account?.id || cleanInput;
+      const lowerUsername = cleanUsername.toLowerCase();
 
       // If password provided in input or target
       const enteredPassword = (targetPassword !== undefined ? targetPassword : password).trim();
 
       if (!account) {
         // Check if it's admin or default account
-        if (cleanUsername === "admin") {
+        if (lowerUsername === "admin") {
           account = {
             id: "admin",
             username: "admin",
@@ -46,11 +45,11 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
             role: "admin",
             createdAt: new Date().toISOString()
           };
-        } else if (cleanUsername === "user1" || cleanUsername === "user2" || cleanUsername === "user3") {
+        } else if (lowerUsername === "user1" || lowerUsername === "user2" || lowerUsername === "user3") {
           account = {
-            id: cleanUsername,
-            username: cleanUsername,
-            password: enteredPassword || cleanUsername,
+            id: lowerUsername,
+            username: lowerUsername,
+            password: enteredPassword || lowerUsername,
             role: "user",
             term: "Summer 2026",
             season: "Summer",
@@ -67,17 +66,17 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
       // If user typed a password, verify it
       if (enteredPassword && account.password && account.password.trim() !== enteredPassword) {
         // Special case: if default credentials match
-        if (!(cleanUsername === "admin" && enteredPassword === "admin") &&
-            !(cleanUsername === "user1" && enteredPassword === "user1") &&
-            !(cleanUsername === "user2" && enteredPassword === "user2") &&
-            !(cleanUsername === "user3" && enteredPassword === "user3")) {
+        if (!(lowerUsername === "admin" && enteredPassword === "admin") &&
+            !(lowerUsername === "user1" && enteredPassword === "user1") &&
+            !(lowerUsername === "user2" && enteredPassword === "user2") &&
+            !(lowerUsername === "user3" && enteredPassword === "user3")) {
           setError("Incorrect password for this username. Please try again.");
           setLoading(false);
           return;
         }
       }
 
-      const email = cleanInput.includes("@") ? cleanInput.toLowerCase() : `${cleanUsername}@network.org`;
+      const email = cleanUsername.includes("@") ? cleanUsername.toLowerCase() : `${cleanUsername.replace(/[^a-zA-Z0-9._-]/g, "_")}@network.org`;
       const passToUse = enteredPassword || account.password || "123456";
       const finalPassword = passToUse.length < 6 ? passToUse.padEnd(6, "0") : passToUse;
 
@@ -86,12 +85,12 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
         email: email,
         uid: "local-" + cleanUsername,
         userName: cleanUsername,
-        displayName: account.username ? (account.username.charAt(0).toUpperCase() + account.username.slice(1)) : cleanUsername,
+        displayName: account.username || cleanUsername,
         isLocal: true,
         term: account.term || (account.role === "admin" ? undefined : "Summer 2026"),
         season: account.season || (account.role === "admin" ? undefined : "Summer"),
         year: account.year || (account.role === "admin" ? undefined : 2026),
-        role: account.role || (cleanUsername === "admin" ? "admin" : "user")
+        role: account.role || (lowerUsername === "admin" ? "admin" : "user")
       };
 
       // Set user immediately in dataService context
