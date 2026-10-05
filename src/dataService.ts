@@ -114,14 +114,33 @@ class DataService {
     return "default_user";
   }
 
-  public isCurrentUserAdmin(): boolean {
-    const userName = this.getCurrentUserName().toLowerCase();
-    if (userName === "admin") return true;
-    if (this.currentUser?.role === "admin") return true;
-    const account = this.getAccountByUsername(userName);
-    if (account?.role === "admin") return true;
-    if (this.currentUser?.email && this.currentUser.email.toLowerCase().includes("admin")) return true;
+  public isUserAdmin(targetUserName?: string): boolean {
+    const raw = (targetUserName || (this.currentUser ? this.getCurrentUserName() : "")).trim();
+    if (!raw || raw === "global") return false;
+    const lower = raw.toLowerCase();
+
+    // Specific rule: users with @ucanwest.ca at their username are regular users (16-node network)
+    if (lower.includes("@ucanwest.ca") || lower.endsWith("@ucanwest.ca")) {
+      return false;
+    }
+
+    if (lower === "admin") return true;
+
+    const account = this.getAccountByUsername(raw);
+    if (account) {
+      return account.role === "admin";
+    }
+
+    if (!targetUserName || targetUserName === this.getCurrentUserName()) {
+      if (this.currentUser?.role === "admin") return true;
+      if (this.currentUser?.email && this.currentUser.email.toLowerCase() === "admin@network.org") return true;
+    }
+
     return false;
+  }
+
+  public isCurrentUserAdmin(): boolean {
+    return this.isUserAdmin(this.getCurrentUserName());
   }
 
   /**
@@ -636,16 +655,83 @@ class DataService {
     }
   }
 
+  public async resetUserFirestoreToSimple16Nodes(userName: string) {
+    if (this.isLocalOnly || !userName || userName === "global") return;
+    try {
+      // 1. Delete existing domains
+      const dimsSnap = await getDocs(collection(db, "users", userName, "domains"));
+      for (const d of dimsSnap.docs) {
+        await deleteDoc(d.ref);
+      }
+
+      // 2. Delete existing nodes
+      const nodesSnap = await getDocs(collection(db, "users", userName, "nodes"));
+      for (const n of nodesSnap.docs) {
+        await deleteDoc(n.ref);
+      }
+
+      // 3. Delete existing edges
+      const edgesSnap = await getDocs(collection(db, "users", userName, "edges"));
+      for (const e of edgesSnap.docs) {
+        await deleteDoc(e.ref);
+      }
+
+      // 4. Seed standard 16-node network (4 domains, 16 indicators, 16 directed edges)
+      const domainsToLoad = SIMPLE_DOMAINS;
+      const nodesToLoad = SIMPLE_NODES.map((node) => ({
+        ...node,
+        id: node.abbr.toUpperCase(),
+        abbr: node.abbr.toUpperCase()
+      }));
+      const edgesToLoad = parseSimpleEdges();
+      const paramsToLoad = SIMPLE_PARAMS;
+
+      for (const d of domainsToLoad) {
+        await setDoc(doc(db, "users", userName, "domains", d.id), d);
+      }
+      for (const n of nodesToLoad) {
+        await setDoc(doc(db, "users", userName, "nodes", n.id), n);
+      }
+      for (let i = 0; i < edgesToLoad.length; i += 400) {
+        const batch = writeBatch(db);
+        const chunk = edgesToLoad.slice(i, i + 400);
+        chunk.forEach((edge) => batch.set(doc(db, "users", userName, "edges", edge.id), edge));
+        await batch.commit();
+      }
+      await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
+
+      if (this.getCurrentUserName() === userName) {
+        this.domains = [...domainsToLoad];
+        this.nodes = [...nodesToLoad];
+        this.edges = [...edgesToLoad];
+        this.params = { ...paramsToLoad };
+        this.saveToLocalStorageOnly();
+        this.notifyAll();
+      }
+      console.log(`Successfully reset user '${userName}' in Firestore to 16-node default network.`);
+    } catch (e) {
+      console.warn(`Failed to reset Firestore network to 16 nodes for user '${userName}':`, e);
+    }
+  }
+
   private async seedInitialUserDataIfEmpty(userName: string) {
     if (this.isLocalOnly || !userName || userName === "global") return;
     try {
       const snap = await getDocs(collection(db, "users", userName, "domains"));
-      if (!snap.empty) return; // User already has data in Firestore
+      const isAdmin = this.isUserAdmin(userName);
 
-      console.log(`Seeding initial network data for user '${userName}' in Firestore...`);
-      const isAdmin = this.isCurrentUserAdmin();
+      if (!snap.empty) {
+        // If non-admin user (including @ucanwest.ca) has 40-node network (7 domains or >4 domains or BI indicator), repair to 16 nodes!
+        if (!isAdmin && (snap.size === 7 || snap.size > 4)) {
+          console.log(`Converting existing user '${userName}' from 40-node network to 16-node default network...`);
+          await this.resetUserFirestoreToSimple16Nodes(userName);
+        }
+        return; // User already has data in Firestore
+      }
+
+      console.log(`Seeding initial network data for user '${userName}' (admin: ${isAdmin}) in Firestore...`);
       const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
-      const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map(node => ({
+      const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map((node) => ({
         ...node,
         id: node.abbr.toUpperCase(),
         abbr: node.abbr.toUpperCase()
@@ -662,11 +748,11 @@ class DataService {
       for (let i = 0; i < edgesToLoad.length; i += 400) {
         const batch = writeBatch(db);
         const chunk = edgesToLoad.slice(i, i + 400);
-        chunk.forEach(edge => batch.set(doc(db, "users", userName, "edges", edge.id), edge));
+        chunk.forEach((edge) => batch.set(doc(db, "users", userName, "edges", edge.id), edge));
         await batch.commit();
       }
       await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
-      console.log(`Initial network data successfully seeded for user '${userName}'`);
+      console.log(`Initial network data successfully seeded for user '${userName}' (${isAdmin ? 40 : 16} nodes)`);
     } catch (e) {
       console.warn(`Could not seed initial network for user '${userName}':`, e);
     }
@@ -683,16 +769,25 @@ class DataService {
       // 1. Domains Listener mapped to users/{userName}/domains
       const unsubDims = onSnapshot(
         collection(db, "users", userName, "domains"),
-        (snapshot) => {
+        async (snapshot) => {
+          const isAdmin = this.isUserAdmin(userName);
           if (!snapshot.empty) {
             const list: Domain[] = [];
             snapshot.forEach((docSnap) => list.push(docSnap.data() as Domain));
             list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+            // If non-admin user (including @ucanwest.ca) currently has 7 domains / 40-node network in Firestore, repair to 16 nodes!
+            if (!isAdmin && (list.length === 7 || list.length > 4 || list.some((d) => d.name === "Critical Infrastructure"))) {
+              console.log(`Auto-repairing non-admin user '${userName}' in Firestore: resetting 40 nodes to 16 nodes default network...`);
+              await this.resetUserFirestoreToSimple16Nodes(userName);
+              return;
+            }
+
             this.domains = list;
           } else {
             // If empty in Firestore and not loaded, seed initial user network
             if (!this.isLoaded) {
-              this.seedInitialUserDataIfEmpty(userName);
+              await this.seedInitialUserDataIfEmpty(userName);
             }
           }
           this.notifyDomainListeners();
@@ -710,7 +805,8 @@ class DataService {
       // 2. Nodes Listener mapped to users/{userName}/nodes
       const unsubNodes = onSnapshot(
         collection(db, "users", userName, "nodes"),
-        (snapshot) => {
+        async (snapshot) => {
+          const isAdmin = this.isUserAdmin(userName);
           if (!snapshot.empty) {
             const list: NodeIndicator[] = [];
             const seenAbbrs = new Set<string>();
@@ -728,6 +824,14 @@ class DataService {
               }
             });
             list.sort((a, b) => a.abbr.localeCompare(b.abbr));
+
+            // If non-admin user has >16 nodes or 40-node indicators (BI, DI), repair to 16 nodes!
+            if (!isAdmin && (list.length > 16 || list.some((n) => n.abbr === "BI" || n.abbr === "DI"))) {
+              console.log(`Auto-repairing non-admin user '${userName}' in Firestore: resetting nodes to 16 nodes default network...`);
+              await this.resetUserFirestoreToSimple16Nodes(userName);
+              return;
+            }
+
             this.nodes = list;
           }
           this.notifyNodeListeners();
@@ -805,7 +909,8 @@ class DataService {
   }
 
   private loadDefaults() {
-    const isAdmin = this.isCurrentUserAdmin();
+    const userName = this.getCurrentUserName();
+    const isAdmin = this.isUserAdmin(userName);
     
     if (isAdmin) {
       this.domains = [...DEFAULT_DOMAINS];
@@ -849,9 +954,22 @@ class DataService {
       }
 
       if (savedDomains && savedNodes && savedEdges) {
-        this.domains = JSON.parse(savedDomains);
-        
+        const loadedDomains = JSON.parse(savedDomains) as Domain[];
         const rawNodes = JSON.parse(savedNodes) as NodeIndicator[];
+        const loadedEdges = JSON.parse(savedEdges);
+        
+        const userName = this.getCurrentUserName();
+        const isAdmin = this.isUserAdmin(userName);
+
+        // If non-admin user (including @ucanwest.ca) has 40-node network (7 domains or >16 nodes or BI node) cached in local storage, reset to 16-node default!
+        if (!isAdmin && (loadedDomains.length === 7 || loadedDomains.length > 4 || rawNodes.length > 16 || rawNodes.some(n => n.abbr === "BI" || n.abbr === "DI"))) {
+          console.log(`Detected 40-node dataset cached locally for non-admin user '${userName}'. Resetting to 16-node default network.`);
+          this.loadDefaults();
+          return;
+        }
+
+        this.domains = loadedDomains;
+        
         const normalizedList: NodeIndicator[] = [];
         const seenAbbrs = new Set<string>();
         for (const n of rawNodes) {
@@ -867,12 +985,11 @@ class DataService {
           }
         }
         this.nodes = normalizedList;
+        this.edges = loadedEdges;
 
-        this.edges = JSON.parse(savedEdges);
         if (savedParams) {
           this.params = JSON.parse(savedParams);
         } else {
-          const isAdmin = this.isCurrentUserAdmin();
           this.params = isAdmin ? { ...DEFAULT_PARAMS } : { ...SIMPLE_PARAMS };
         }
       } else {
@@ -1407,7 +1524,7 @@ class DataService {
     const userName = this.getCurrentUserName();
     if (!this.isLocalOnly && userName && userName !== "global") {
       try {
-        const isAdmin = this.isCurrentUserAdmin();
+        const isAdmin = this.isUserAdmin(userName);
         const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
         const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map(node => ({
           ...node,
@@ -1415,6 +1532,21 @@ class DataService {
           abbr: node.abbr.toUpperCase()
         }));
         const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
+        const paramsToLoad = isAdmin ? DEFAULT_PARAMS : SIMPLE_PARAMS;
+
+        // Clear out any obsolete Firestore documents first (crucial if non-admin previously had 40 nodes)
+        const dimsSnap = await getDocs(collection(db, "users", userName, "domains"));
+        for (const d of dimsSnap.docs) {
+          await deleteDoc(d.ref);
+        }
+        const nodesSnap = await getDocs(collection(db, "users", userName, "nodes"));
+        for (const n of nodesSnap.docs) {
+          await deleteDoc(n.ref);
+        }
+        const edgesSnap = await getDocs(collection(db, "users", userName, "edges"));
+        for (const e of edgesSnap.docs) {
+          await deleteDoc(e.ref);
+        }
 
         for (const domain of domainsToLoad) {
           await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
@@ -1430,9 +1562,8 @@ class DataService {
           });
           await edgeBatch.commit();
         }
-        const paramsToLoad = isAdmin ? DEFAULT_PARAMS : SIMPLE_PARAMS;
         await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
-        console.log(`Default network successfully imported for user: ${userName}`);
+        console.log(`Default network successfully imported for user: ${userName} (${isAdmin ? 40 : 16} nodes)`);
       } catch (e) {
         console.warn(`Importing default network to Firestore failed for ${userName}:`, e);
       }

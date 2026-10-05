@@ -78,12 +78,7 @@ export default function App() {
 
   const currentUserName = dataService.getCurrentUserName();
   const activeUserKey = user?.userName || (currentUserName !== "global" ? currentUserName : (user?.email ? user.email : ""));
-  const isAdmin = 
-    activeUserKey.toLowerCase() === "admin" || 
-    user?.role === "admin" || 
-    dataService.isCurrentUserAdmin() || 
-    (user?.email && user.email.toLowerCase().includes("admin")) || 
-    false;
+  const isAdmin = dataService.isUserAdmin(activeUserKey);
   let userDisplayName = "User";
   let modeDisplayName = "Mode A";
 

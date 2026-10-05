@@ -90,7 +90,7 @@ export default function LoginPage({ onLocalLogin }: LoginPageProps) {
         term: account.term || (account.role === "admin" ? undefined : "Summer 2026"),
         season: account.season || (account.role === "admin" ? undefined : "Summer"),
         year: account.year || (account.role === "admin" ? undefined : 2026),
-        role: account.role || (lowerUsername === "admin" ? "admin" : "user")
+        role: dataService.isUserAdmin(cleanUsername) ? "admin" : "user"
       };
 
       // Set user immediately in dataService context
