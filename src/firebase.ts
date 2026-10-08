@@ -23,9 +23,15 @@ export const db = getFirestore(app, "ai-studio-ursaurbanresilie-61980384-3819-42
 async function testFirestoreConnection() {
   try {
     await getDocFromServer(doc(db, "system", "connection_probe"));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("the client is offline")) {
+  } catch (error: any) {
+    const msg = error?.message || "";
+    if (msg.includes("the client is offline")) {
       console.warn("Firestore client is offline or network restricted.");
+    } else if (error?.code === "resource-exhausted" || msg.includes("Quota limit exceeded")) {
+      console.warn("Firestore free daily quota reached; falling back to offline persistent mode.");
+      try {
+        localStorage.setItem("ursa_firestore_quota_exhausted", "true");
+      } catch {}
     }
   }
 }

@@ -181,51 +181,51 @@ export function parseDefaultEdges(): Edge[] {
 
 
 export const SIMPLE_DOMAINS: Domain[] = [
-  { id: "1", name: "Domain 1" },
-  { id: "2", name: "Domain 2" },
-  { id: "3", name: "Domain 3" },
-  { id: "4", name: "Domain 4" }
+  { id: "1", name: "Critical Infrastructure" },
+  { id: "2", name: "Economics & Finance" },
+  { id: "3", name: "Environment & Ecology" },
+  { id: "4", name: "Health & Well-being" }
 ];
 
 export const SIMPLE_NODES: NodeIndicator[] = [
-  { id: "N1", abbr: "N1", full_name: "Indicator 1", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N2", abbr: "N2", full_name: "Indicator 2", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N3", abbr: "N3", full_name: "Indicator 3", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "BI", abbr: "BI", full_name: "Built Infrastructure", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "DI", abbr: "DI", full_name: "Digital Infrastructure", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "EN", abbr: "EN", full_name: "Energy", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
+  { id: "WR", abbr: "WR", full_name: "Water", domain_id: "1", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "N4", abbr: "N4", full_name: "Indicator 4", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N5", abbr: "N5", full_name: "Indicator 5", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N6", abbr: "N6", full_name: "Indicator 6", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N7", abbr: "N7", full_name: "Indicator 7", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "BE", abbr: "BE", full_name: "Business Environment", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "PF", abbr: "PF", full_name: "Public Finance", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "IN", abbr: "IN", full_name: "Income", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
+  { id: "ER", abbr: "ER", full_name: "Economic Robustness", domain_id: "2", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "N8", abbr: "N8", full_name: "Indicator 8", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N9", abbr: "N9", full_name: "Indicator 9", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N10", abbr: "N10", full_name: "Indicator 10", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N11", abbr: "N11", full_name: "Indicator 11", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "AQ", abbr: "AQ", full_name: "Air Quality", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "DC", abbr: "DC", full_name: "Decarbonization", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "FL", abbr: "FL", full_name: "Flooding", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
+  { id: "GI", abbr: "GI", full_name: "Green Infrastructure", domain_id: "3", theta: 0.2, recovery_rate: 0.05 },
 
-  { id: "N12", abbr: "N12", full_name: "Indicator 12", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N13", abbr: "N13", full_name: "Indicator 13", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N14", abbr: "N14", full_name: "Indicator 14", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N15", abbr: "N15", full_name: "Indicator 15", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
-  { id: "N16", abbr: "N16", full_name: "Indicator 16", domain_id: "4", theta: 0.2, recovery_rate: 0.05 }
+  { id: "PH", abbr: "PH", full_name: "Public Health", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "ED", abbr: "ED", full_name: "Education", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "DM", abbr: "DM", full_name: "Disaster Management", domain_id: "4", theta: 0.2, recovery_rate: 0.05 },
+  { id: "SC", abbr: "SC", full_name: "Social Cohesion", domain_id: "4", theta: 0.2, recovery_rate: 0.05 }
 ];
 
 export function parseSimpleEdges(): Edge[] {
   return [
-    { id: "e1", source: "N1", target: "N2", weight: 1.0 },
-    { id: "e2", source: "N2", target: "N3", weight: 1.0 },
-    { id: "e3", source: "N3", target: "N4", weight: 1.0 },
-    { id: "e4", source: "N4", target: "N5", weight: 1.0 },
-    { id: "e5", source: "N5", target: "N6", weight: 1.0 },
-    { id: "e6", source: "N6", target: "N7", weight: 1.0 },
-    { id: "e7", source: "N7", target: "N8", weight: 1.0 },
-    { id: "e8", source: "N8", target: "N9", weight: 1.0 },
-    { id: "e9", source: "N9", target: "N10", weight: 1.0 },
-    { id: "e10", source: "N10", target: "N11", weight: 1.0 },
-    { id: "e11", source: "N11", target: "N12", weight: 1.0 },
-    { id: "e12", source: "N12", target: "N13", weight: 1.0 },
-    { id: "e13", source: "N13", target: "N14", weight: 1.0 },
-    { id: "e14", source: "N14", target: "N15", weight: 1.0 },
-    { id: "e15", source: "N15", target: "N16", weight: 1.0 },
-    { id: "e16", source: "N16", target: "N1", weight: 1.0 }
+    { id: "e1", source: "BI", target: "DI", weight: 1.0 },
+    { id: "e2", source: "DI", target: "EN", weight: 1.0 },
+    { id: "e3", source: "EN", target: "WR", weight: 1.0 },
+    { id: "e4", source: "WR", target: "BE", weight: 1.0 },
+    { id: "e5", source: "BE", target: "PF", weight: 1.0 },
+    { id: "e6", source: "PF", target: "IN", weight: 1.0 },
+    { id: "e7", source: "IN", target: "ER", weight: 1.0 },
+    { id: "e8", source: "ER", target: "AQ", weight: 1.0 },
+    { id: "e9", source: "AQ", target: "DC", weight: 1.0 },
+    { id: "e10", source: "DC", target: "FL", weight: 1.0 },
+    { id: "e11", source: "FL", target: "GI", weight: 1.0 },
+    { id: "e12", source: "GI", target: "PH", weight: 1.0 },
+    { id: "e13", source: "PH", target: "ED", weight: 1.0 },
+    { id: "e14", source: "ED", target: "DM", weight: 1.0 },
+    { id: "e15", source: "DM", target: "SC", weight: 1.0 },
+    { id: "e16", source: "SC", target: "BI", weight: 1.0 }
   ];
 }

@@ -55,7 +55,10 @@ class DataService {
   private accounts: AppUserAccount[] = [...DEFAULT_USER_ACCOUNTS];
   private learnVisibility: LearnVisibilityConfig = { ...DEFAULT_LEARN_VISIBILITY };
   private isLocalOnly = false;
+  private isQuotaExhausted = false;
   private isLoaded = false;
+  private isRestoring = false;
+  private isClearing = false;
   private currentUser: any = null;
 
   private domainListeners: Set<Listener<Domain>> = new Set();
@@ -76,14 +79,45 @@ class DataService {
     this.init();
   }
 
+  private handleFirestoreError(e: any, context?: string) {
+    const msg = String(e?.message || "");
+    const code = String(e?.code || "");
+    const isQuota = code === "resource-exhausted" ||
+                    msg.includes("resource-exhausted") ||
+                    msg.includes("Quota limit exceeded") ||
+                    msg.includes("quota");
+    if (isQuota) {
+      if (!this.isQuotaExhausted) {
+        console.warn(`Firestore free daily write quota reached during ${context || "operation"}. Automatically falling back to local persistent storage.`);
+      }
+      this.isQuotaExhausted = true;
+      this.isLocalOnly = true;
+      try {
+        localStorage.setItem("ursa_firestore_quota_exhausted", "true");
+      } catch {}
+      this.notifyStatusListeners();
+    } else {
+      console.warn(`Firestore warning during ${context || "operation"}:`, e);
+    }
+  }
+
   private init() {
+    try {
+      if (localStorage.getItem("ursa_firestore_quota_exhausted") === "true") {
+        this.isQuotaExhausted = true;
+        this.isLocalOnly = true;
+      }
+    } catch {}
+
     // Immediate local copy loading
     this.loadFromLocalStorage();
     this.loadAccountsFromLocalStorage();
     this.loadLearnVisibilityFromLocalStorage();
-    this.initSystemLimitsListener();
-    this.initAccountsListener();
-    this.initLearnVisibilityListener();
+    if (!this.isQuotaExhausted) {
+      this.initSystemLimitsListener();
+      this.initAccountsListener();
+      this.initLearnVisibilityListener();
+    }
   }
 
   // --- Unique Username Helpers & Validation ---
@@ -214,18 +248,33 @@ class DataService {
 
   private loadAccountsFromLocalStorage() {
     try {
+      const accountMap = new Map<string, AppUserAccount>();
+      DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id.toLowerCase(), { ...a }));
+
       const saved = localStorage.getItem("ursa_user_accounts");
       if (saved) {
         const parsed: AppUserAccount[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const accountMap = new Map<string, AppUserAccount>();
-          DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id, a));
-          parsed.forEach((a) => accountMap.set(a.id, a));
-          this.accounts = Array.from(accountMap.values());
+          parsed.forEach((a) => {
+            if (a && (a.id || a.username)) {
+              const key = (a.id || a.username).toLowerCase();
+              const def = DEFAULT_USER_ACCOUNTS.find((d) => d.id.toLowerCase() === key);
+              accountMap.set(key, {
+                id: key,
+                username: a.username || def?.username || key,
+                password: a.password || def?.password || key,
+                role: a.role || def?.role || (key === "admin" ? "admin" : "user"),
+                term: a.term || def?.term || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer 2026"),
+                season: a.season || def?.season || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer"),
+                year: a.year || def?.year || (a.role === "admin" || def?.role === "admin" ? undefined : 2026),
+                createdAt: a.createdAt || def?.createdAt || new Date().toISOString(),
+                updatedAt: a.updatedAt
+              });
+            }
+          });
         }
-      } else {
-        localStorage.setItem("ursa_user_accounts", JSON.stringify(DEFAULT_USER_ACCOUNTS));
       }
+      this.accounts = Array.from(accountMap.values());
     } catch (e) {
       this.accounts = [...DEFAULT_USER_ACCOUNTS];
     }
@@ -251,12 +300,28 @@ class DataService {
             const data = snapshot.data();
             if (data?.accounts && Array.isArray(data.accounts)) {
               const accountMap = new Map<string, AppUserAccount>();
-              DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id, a));
+              DEFAULT_USER_ACCOUNTS.forEach((a) => accountMap.set(a.id.toLowerCase(), { ...a }));
+
               data.accounts.forEach((a: AppUserAccount) => {
-                if (a.id && a.username) {
-                  accountMap.set(a.id.toLowerCase(), a);
+                if (a && (a.id || a.username)) {
+                  const key = (a.id || a.username).toLowerCase();
+                  const def = DEFAULT_USER_ACCOUNTS.find((d) => d.id.toLowerCase() === key);
+
+                  const fullAccount: AppUserAccount = {
+                    id: key,
+                    username: a.username || def?.username || key,
+                    password: a.password || def?.password || key,
+                    role: a.role || def?.role || (key === "admin" ? "admin" : "user"),
+                    term: a.term || def?.term || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer 2026"),
+                    season: a.season || def?.season || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer"),
+                    year: a.year || def?.year || (a.role === "admin" || def?.role === "admin" ? undefined : 2026),
+                    createdAt: a.createdAt || def?.createdAt || new Date().toISOString(),
+                    updatedAt: a.updatedAt
+                  };
+                  accountMap.set(key, fullAccount);
                 }
               });
+
               this.accounts = Array.from(accountMap.values());
               this.saveAccountsToLocalStorage();
               this.notifyAccountsListeners();
@@ -436,37 +501,61 @@ class DataService {
       this.accounts = [...this.accounts, newAccount];
     }
 
+    // Ensure default accounts are present in this.accounts before persisting
+    const finalAccountMap = new Map<string, AppUserAccount>();
+    DEFAULT_USER_ACCOUNTS.forEach((a) => finalAccountMap.set(a.id.toLowerCase(), { ...a }));
+    this.accounts.forEach((a) => {
+      if (a && (a.id || a.username)) {
+        const key = (a.id || a.username).toLowerCase();
+        const def = DEFAULT_USER_ACCOUNTS.find((d) => d.id.toLowerCase() === key);
+        finalAccountMap.set(key, {
+          id: key,
+          username: a.username || def?.username || key,
+          password: a.password || def?.password || key,
+          role: a.role || def?.role || (key === "admin" ? "admin" : "user"),
+          term: a.term || def?.term || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer 2026"),
+          season: a.season || def?.season || (a.role === "admin" || def?.role === "admin" ? undefined : "Summer"),
+          year: a.year || def?.year || (a.role === "admin" || def?.role === "admin" ? undefined : 2026),
+          createdAt: a.createdAt || def?.createdAt || new Date().toISOString(),
+          updatedAt: a.updatedAt
+        });
+      }
+    });
+    this.accounts = Array.from(finalAccountMap.values());
+
     this.notifyAccountsListeners();
     this.saveAccountsToLocalStorage();
 
     // Persist to system/user_accounts document
-    try {
-      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
-    } catch (e) {
-      console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
-    }
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+      } catch (e) {
+        this.handleFirestoreError(e, "persist accounts to system/user_accounts");
+      }
 
-    // Persist user document to users/{clean}
-    try {
-      const userDocRef = doc(db, "users", clean);
-      await setDoc(userDocRef, {
-        id: clean,
-        userName: clean,
-        name: clean,
-        email: clean.includes("@") ? clean : `${clean}@network.org`,
-        displayName: clean.charAt(0).toUpperCase() + clean.slice(1),
-        role: newAccount.role,
-        term: newAccount.term || (newAccount.role === "admin" ? undefined : "Summer 2026"),
-        season: newAccount.season || (newAccount.role === "admin" ? undefined : "Summer"),
-        year: newAccount.year || (newAccount.role === "admin" ? undefined : 2026),
-        createdAt: newAccount.createdAt,
-        updatedAt: newAccount.updatedAt
-      }, { merge: true });
+      // Persist user document to users/{clean}
+      try {
+        const userDocRef = doc(db, "users", clean);
+        await setDoc(userDocRef, {
+          id: clean,
+          userName: clean,
+          name: clean,
+          email: clean.includes("@") ? clean : `${clean}@network.org`,
+          displayName: clean.charAt(0).toUpperCase() + clean.slice(1),
+          role: newAccount.role,
+          term: newAccount.term || (newAccount.role === "admin" ? undefined : "Summer 2026"),
+          season: newAccount.season || (newAccount.role === "admin" ? undefined : "Summer"),
+          year: newAccount.year || (newAccount.role === "admin" ? undefined : 2026),
+          createdAt: newAccount.createdAt,
+          updatedAt: newAccount.updatedAt
+        }, { merge: true });
 
-      // Pre-seed user's network workspace under /users/{clean}/...
-      await this.seedInitialUserDataIfEmpty(clean);
-    } catch (e) {
-      console.warn(`Failed to initialize Firestore user profile for ${clean}:`, e);
+        // Pre-seed user's network workspace under /users/{clean}/...
+        await this.seedInitialUserDataIfEmpty(clean);
+      } catch (e) {
+        this.handleFirestoreError(e, `initialize user profile for ${clean}`);
+      }
     }
 
     return { overwritten };
@@ -488,20 +577,22 @@ class DataService {
     this.notifyAccountsListeners();
     this.saveAccountsToLocalStorage();
 
-    try {
-      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
-      await setDoc(doc(db, "users", raw), {
-        ...updates,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-      if (raw !== clean) {
-        await setDoc(doc(db, "users", clean), {
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+        await setDoc(doc(db, "users", raw), {
           ...updates,
           updatedAt: new Date().toISOString()
         }, { merge: true });
+        if (raw !== clean) {
+          await setDoc(doc(db, "users", clean), {
+            ...updates,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      } catch (e) {
+        this.handleFirestoreError(e, "update user account in Firestore");
       }
-    } catch (e) {
-      console.warn("Failed to persist accounts to Firestore system/user_accounts:", e);
     }
   }
 
@@ -517,14 +608,16 @@ class DataService {
     this.notifyAccountsListeners();
     this.saveAccountsToLocalStorage();
 
-    try {
-      await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
-      await deleteDoc(doc(db, "users", raw));
-      if (raw !== clean) {
-        await deleteDoc(doc(db, "users", clean));
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "user_accounts"), { accounts: this.accounts }, { merge: true });
+        await deleteDoc(doc(db, "users", raw));
+        if (raw !== clean) {
+          await deleteDoc(doc(db, "users", clean));
+        }
+      } catch (e) {
+        this.handleFirestoreError(e, "delete user from Firestore");
       }
-    } catch (e) {
-      console.warn("Failed to delete user from Firestore:", e);
     }
   }
 
@@ -562,7 +655,7 @@ class DataService {
   }
 
   private async saveUserMetadata(user: any) {
-    if (!user) return;
+    if (!user || this.isLocalOnly || this.isQuotaExhausted) return;
     const userName = this.getCurrentUserName();
     if (!userName || userName === "global") return;
 
@@ -610,12 +703,12 @@ class DataService {
 
       await setDoc(userRef, updatePayload, { merge: true });
     } catch (e) {
-      console.warn("Failed to write user metadata to Firestore:", e);
+      this.handleFirestoreError(e, "saveUserMetadata");
     }
   }
 
   private async checkAndMigrateLegacyData(userName: string) {
-    if (!this.currentUser?.uid || this.currentUser.uid === userName || this.currentUser.uid.startsWith("local-")) {
+    if (this.isLocalOnly || this.isQuotaExhausted || !this.currentUser?.uid || this.currentUser.uid === userName || this.currentUser.uid.startsWith("local-")) {
       return;
     }
     const legacyUid = this.currentUser.uid;
@@ -651,32 +744,17 @@ class DataService {
         console.log(`Legacy data migration for ${userName} complete!`);
       }
     } catch (e) {
-      console.warn("Legacy data migration check completed:", e);
+      this.handleFirestoreError(e, "checkAndMigrateLegacyData");
     }
   }
 
   public async resetUserFirestoreToSimple16Nodes(userName: string) {
-    if (this.isLocalOnly || !userName || userName === "global") return;
+    if (this.isLocalOnly || this.isQuotaExhausted || !userName || userName === "global") return;
     try {
-      // 1. Delete existing domains
-      const dimsSnap = await getDocs(collection(db, "users", userName, "domains"));
-      for (const d of dimsSnap.docs) {
-        await deleteDoc(d.ref);
-      }
+      // 1. Clear existing network documents while preserving collection containers
+      await this.clearFirestoreNetwork(userName);
 
-      // 2. Delete existing nodes
-      const nodesSnap = await getDocs(collection(db, "users", userName, "nodes"));
-      for (const n of nodesSnap.docs) {
-        await deleteDoc(n.ref);
-      }
-
-      // 3. Delete existing edges
-      const edgesSnap = await getDocs(collection(db, "users", userName, "edges"));
-      for (const e of edgesSnap.docs) {
-        await deleteDoc(e.ref);
-      }
-
-      // 4. Seed standard 16-node network (4 domains, 16 indicators, 16 directed edges)
+      // 2. Seed standard 16-node network (4 domains, 16 indicators, 16 directed edges)
       const domainsToLoad = SIMPLE_DOMAINS;
       const nodesToLoad = SIMPLE_NODES.map((node) => ({
         ...node,
@@ -710,25 +788,27 @@ class DataService {
       }
       console.log(`Successfully reset user '${userName}' in Firestore to 16-node default network.`);
     } catch (e) {
-      console.warn(`Failed to reset Firestore network to 16 nodes for user '${userName}':`, e);
+      this.handleFirestoreError(e, `resetUserFirestoreToSimple16Nodes for ${userName}`);
     }
   }
 
   private async seedInitialUserDataIfEmpty(userName: string) {
-    if (this.isLocalOnly || !userName || userName === "global") return;
+    if (this.isLocalOnly || this.isQuotaExhausted || !userName || userName === "global" || this.isRestoring) return;
     try {
       const snap = await getDocs(collection(db, "users", userName, "domains"));
-      const isAdmin = this.isUserAdmin(userName);
-
       if (!snap.empty) {
-        // If non-admin user (including @ucanwest.ca) has 40-node network (7 domains or >4 domains or BI indicator), repair to 16 nodes!
-        if (!isAdmin && (snap.size === 7 || snap.size > 4)) {
-          console.log(`Converting existing user '${userName}' from 40-node network to 16-node default network...`);
-          await this.resetUserFirestoreToSimple16Nodes(userName);
-        }
-        return; // User already has data in Firestore
+        return; // User already has domain data in Firestore
       }
 
+      // Check if user has saved config in Firestore or local storage before seeding defaults
+      const savedConfig = await this.getCustomNetworkConfig();
+      if (savedConfig && savedConfig.domains && savedConfig.domains.length > 0) {
+        console.log(`Seeding user '${userName}' workspace from saved configuration '${savedConfig.name || "Latest Saved Config"}'...`);
+        await this.restoreCustomNetworkConfig(savedConfig);
+        return;
+      }
+
+      const isAdmin = this.isUserAdmin(userName);
       console.log(`Seeding initial network data for user '${userName}' (admin: ${isAdmin}) in Firestore...`);
       const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
       const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map((node) => ({
@@ -754,7 +834,7 @@ class DataService {
       await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
       console.log(`Initial network data successfully seeded for user '${userName}' (${isAdmin ? 40 : 16} nodes)`);
     } catch (e) {
-      console.warn(`Could not seed initial network for user '${userName}':`, e);
+      this.handleFirestoreError(e, `seedInitialUserData for ${userName}`);
     }
   }
 
@@ -763,6 +843,11 @@ class DataService {
     const userName = this.getCurrentUserName();
     if (!userName || userName === "global") return;
 
+    if (this.isLocalOnly || this.isQuotaExhausted) {
+      this.isLoaded = true;
+      return;
+    }
+
     try {
       this.checkAndMigrateLegacyData(userName);
 
@@ -770,34 +855,30 @@ class DataService {
       const unsubDims = onSnapshot(
         collection(db, "users", userName, "domains"),
         async (snapshot) => {
-          const isAdmin = this.isUserAdmin(userName);
-          if (!snapshot.empty) {
-            const list: Domain[] = [];
-            snapshot.forEach((docSnap) => list.push(docSnap.data() as Domain));
-            list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+          if (this.isRestoring || this.isClearing) return;
+          const list: Domain[] = [];
+          snapshot.forEach((docSnap) => {
+            if (docSnap.id.startsWith("_")) return;
+            const data = docSnap.data() as Domain;
+            if ((data as any).placeholder) return;
+            list.push(data);
+          });
+          list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+          this.domains = list;
 
-            // If non-admin user (including @ucanwest.ca) currently has 7 domains / 40-node network in Firestore, repair to 16 nodes!
-            if (!isAdmin && (list.length === 7 || list.length > 4 || list.some((d) => d.name === "Critical Infrastructure"))) {
-              console.log(`Auto-repairing non-admin user '${userName}' in Firestore: resetting 40 nodes to 16 nodes default network...`);
-              await this.resetUserFirestoreToSimple16Nodes(userName);
-              return;
-            }
-
-            this.domains = list;
-          } else {
-            // If empty in Firestore and not loaded, seed initial user network
-            if (!this.isLoaded) {
-              await this.seedInitialUserDataIfEmpty(userName);
-            }
+          // If completely empty in Firestore (no documents or placeholders) and not loaded, seed initial user network
+          if (list.length === 0 && snapshot.empty && !this.isLoaded && !this.isRestoring && !this.isClearing && !this.isLocalOnly && !this.isQuotaExhausted) {
+            await this.seedInitialUserDataIfEmpty(userName);
           }
-          this.notifyDomainListeners();
-          this.saveToLocalStorageOnly();
+
+          if (!this.isRestoring && !this.isClearing) {
+            this.notifyDomainListeners();
+            this.saveToLocalStorageOnly();
+          }
           this.isLoaded = true;
         },
         (err) => {
-          console.warn(`Firestore domains loading failed for ${userName}, using local:`, err);
-          this.isLocalOnly = true;
-          this.notifyStatusListeners();
+          this.handleFirestoreError(err, `domains loading for ${userName}`);
           this.isLoaded = true;
         }
       );
@@ -806,42 +887,35 @@ class DataService {
       const unsubNodes = onSnapshot(
         collection(db, "users", userName, "nodes"),
         async (snapshot) => {
-          const isAdmin = this.isUserAdmin(userName);
-          if (!snapshot.empty) {
-            const list: NodeIndicator[] = [];
-            const seenAbbrs = new Set<string>();
-            snapshot.forEach((docSnap) => {
-              const node = docSnap.data() as NodeIndicator;
-              const standardizedId = node.abbr.trim().toUpperCase();
-              const standardizedNode: NodeIndicator = {
-                ...node,
-                id: standardizedId,
-                abbr: standardizedId
-              };
-              if (!seenAbbrs.has(standardizedNode.abbr)) {
-                seenAbbrs.add(standardizedNode.abbr);
-                list.push(standardizedNode);
-              }
-            });
-            list.sort((a, b) => a.abbr.localeCompare(b.abbr));
-
-            // If non-admin user has >16 nodes or 40-node indicators (BI, DI), repair to 16 nodes!
-            if (!isAdmin && (list.length > 16 || list.some((n) => n.abbr === "BI" || n.abbr === "DI"))) {
-              console.log(`Auto-repairing non-admin user '${userName}' in Firestore: resetting nodes to 16 nodes default network...`);
-              await this.resetUserFirestoreToSimple16Nodes(userName);
-              return;
+          if (this.isRestoring || this.isClearing) return;
+          const list: NodeIndicator[] = [];
+          const seenAbbrs = new Set<string>();
+          snapshot.forEach((docSnap) => {
+            if (docSnap.id.startsWith("_")) return;
+            const node = docSnap.data() as NodeIndicator;
+            if ((node as any).placeholder) return;
+            const standardizedId = node.abbr.trim().toUpperCase();
+            const standardizedNode: NodeIndicator = {
+              ...node,
+              id: standardizedId,
+              abbr: standardizedId
+            };
+            if (!seenAbbrs.has(standardizedNode.abbr)) {
+              seenAbbrs.add(standardizedNode.abbr);
+              list.push(standardizedNode);
             }
+          });
+          list.sort((a, b) => a.abbr.localeCompare(b.abbr));
+          this.nodes = list;
 
-            this.nodes = list;
+          if (!this.isRestoring && !this.isClearing) {
+            this.notifyNodeListeners();
+            this.saveToLocalStorageOnly();
           }
-          this.notifyNodeListeners();
-          this.saveToLocalStorageOnly();
           this.isLoaded = true;
         },
         (err) => {
-          console.warn(`Firestore nodes loading failed for ${userName}, using local:`, err);
-          this.isLocalOnly = true;
-          this.notifyStatusListeners();
+          this.handleFirestoreError(err, `nodes loading for ${userName}`);
           this.isLoaded = true;
         }
       );
@@ -850,19 +924,24 @@ class DataService {
       const unsubEdges = onSnapshot(
         collection(db, "users", userName, "edges"),
         (snapshot) => {
-          if (!snapshot.empty) {
-            const list: Edge[] = [];
-            snapshot.forEach((docSnap) => list.push(docSnap.data() as Edge));
-            this.edges = list;
+          if (this.isRestoring || this.isClearing) return;
+          const list: Edge[] = [];
+          snapshot.forEach((docSnap) => {
+            if (docSnap.id.startsWith("_")) return;
+            const edge = docSnap.data() as Edge;
+            if ((edge as any).placeholder) return;
+            list.push(edge);
+          });
+          this.edges = list;
+
+          if (!this.isRestoring && !this.isClearing) {
+            this.notifyEdgeListeners();
+            this.saveToLocalStorageOnly();
           }
-          this.notifyEdgeListeners();
-          this.saveToLocalStorageOnly();
           this.isLoaded = true;
         },
         (err) => {
-          console.warn(`Firestore edges loading failed for ${userName}, using local:`, err);
-          this.isLocalOnly = true;
-          this.notifyStatusListeners();
+          this.handleFirestoreError(err, `edges loading for ${userName}`);
           this.isLoaded = true;
         }
       );
@@ -871,26 +950,25 @@ class DataService {
       const unsubParams = onSnapshot(
         doc(db, "users", userName, "params", "default"),
         (snapshot) => {
+          if (this.isRestoring) return;
           if (snapshot.exists()) {
             this.params = snapshot.data() as SimulatorParams;
           }
-          this.notifyParamsListeners();
-          this.saveToLocalStorageOnly();
+          if (!this.isRestoring) {
+            this.notifyParamsListeners();
+            this.saveToLocalStorageOnly();
+          }
           this.isLoaded = true;
         },
         (err) => {
-          console.warn(`Firestore params loading failed for ${userName}, using local:`, err);
-          this.isLocalOnly = true;
-          this.notifyStatusListeners();
+          this.handleFirestoreError(err, `params loading for ${userName}`);
           this.isLoaded = true;
         }
       );
 
       this.unsubs.push(unsubDims, unsubNodes, unsubEdges, unsubParams);
     } catch (e) {
-      console.error(`Failed to initialize user Firestore listeners for ${userName}:`, e);
-      this.isLocalOnly = true;
-      this.notifyStatusListeners();
+      this.handleFirestoreError(e, `init user listeners for ${userName}`);
       this.isLoaded = true;
     }
   }
@@ -958,16 +1036,6 @@ class DataService {
         const rawNodes = JSON.parse(savedNodes) as NodeIndicator[];
         const loadedEdges = JSON.parse(savedEdges);
         
-        const userName = this.getCurrentUserName();
-        const isAdmin = this.isUserAdmin(userName);
-
-        // If non-admin user (including @ucanwest.ca) has 40-node network (7 domains or >16 nodes or BI node) cached in local storage, reset to 16-node default!
-        if (!isAdmin && (loadedDomains.length === 7 || loadedDomains.length > 4 || rawNodes.length > 16 || rawNodes.some(n => n.abbr === "BI" || n.abbr === "DI"))) {
-          console.log(`Detected 40-node dataset cached locally for non-admin user '${userName}'. Resetting to 16-node default network.`);
-          this.loadDefaults();
-          return;
-        }
-
         this.domains = loadedDomains;
         
         const normalizedList: NodeIndicator[] = [];
@@ -990,6 +1058,8 @@ class DataService {
         if (savedParams) {
           this.params = JSON.parse(savedParams);
         } else {
+          const userName = this.getCurrentUserName();
+          const isAdmin = this.isUserAdmin(userName);
           this.params = isAdmin ? { ...DEFAULT_PARAMS } : { ...SIMPLE_PARAMS };
         }
       } else {
@@ -1100,10 +1170,12 @@ class DataService {
       console.warn("Failed to write simulation limits to localStorage:", e);
     }
 
-    try {
-      await setDoc(doc(db, "system", "slider_limits"), newLimits);
-    } catch (e) {
-      console.warn("Failed to write simulation limits to Firestore, saved locally:", e);
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "slider_limits"), newLimits);
+      } catch (e) {
+        this.handleFirestoreError(e, "saveSimulationLimits");
+      }
     }
   }
 
@@ -1151,11 +1223,11 @@ class DataService {
           }
         },
         (err) => {
-          console.warn("System learn visibility Firestore listener failed, using local/default:", err);
+          this.handleFirestoreError(err, "system learn visibility listener");
         }
       );
     } catch (e) {
-      console.warn("Failed to attach system learn visibility listener:", e);
+      this.handleFirestoreError(e, "attach learn visibility listener");
     }
   }
 
@@ -1182,10 +1254,12 @@ class DataService {
       console.warn("Failed to write learn visibility to localStorage:", e);
     }
 
-    try {
-      await setDoc(doc(db, "system", "learn_visibility"), newVisibility);
-    } catch (e) {
-      console.warn("Failed to write learn visibility to Firestore, saved locally:", e);
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "learn_visibility"), newVisibility);
+      } catch (e) {
+        this.handleFirestoreError(e, "saveLearnVisibility");
+      }
     }
   }
 
@@ -1241,11 +1315,11 @@ class DataService {
     this.notifyParamsListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await setDoc(doc(db, "users", userName, "params", p.id || "default"), p);
       } catch (e) {
-        console.warn(`Failed to write params for ${userName} to Firestore, saved locally:`, e);
+        this.handleFirestoreError(e, `saveParams for ${userName}`);
       }
     }
   }
@@ -1262,11 +1336,11 @@ class DataService {
     this.notifyDomainListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
       } catch (e) {
-        console.warn(`Failed to write domain for ${userName} to Firestore, saved locally:`, e);
+        this.handleFirestoreError(e, `saveDomain for ${userName}`);
       }
     }
   }
@@ -1277,11 +1351,17 @@ class DataService {
     this.notifyDomainListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await deleteDoc(doc(db, "users", userName, "domains", id));
+        if (this.domains.length === 0) {
+          await setDoc(doc(db, "users", userName, "domains", "_placeholder"), {
+            placeholder: true,
+            updatedAt: new Date().toISOString()
+          });
+        }
       } catch (e) {
-        console.warn(`Failed to delete domain for ${userName} in Firestore:`, e);
+        this.handleFirestoreError(e, `deleteDomain for ${userName}`);
       }
     }
   }
@@ -1305,7 +1385,7 @@ class DataService {
     this.notifyNodeListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await setDoc(doc(db, "users", userName, "nodes", standardizedId), standardizedNode);
         const originalId = node.id;
@@ -1313,7 +1393,7 @@ class DataService {
           await deleteDoc(doc(db, "users", userName, "nodes", originalId));
         }
       } catch (e) {
-        console.warn(`Failed to write node for ${userName} to Firestore, saved locally:`, e);
+        this.handleFirestoreError(e, `saveNode for ${userName}`);
       }
     }
   }
@@ -1329,7 +1409,7 @@ class DataService {
     this.notifyEdgeListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await deleteDoc(doc(db, "users", userName, "nodes", id));
         if (id !== uppercaseId) {
@@ -1338,8 +1418,20 @@ class DataService {
         for (const edge of edgesToDelete) {
           await deleteDoc(doc(db, "users", userName, "edges", edge.id));
         }
+        if (this.nodes.length === 0) {
+          await setDoc(doc(db, "users", userName, "nodes", "_placeholder"), {
+            placeholder: true,
+            updatedAt: new Date().toISOString()
+          });
+        }
+        if (this.edges.length === 0) {
+          await setDoc(doc(db, "users", userName, "edges", "_placeholder"), {
+            placeholder: true,
+            updatedAt: new Date().toISOString()
+          });
+        }
       } catch (e) {
-        console.warn(`Failed to delete node for ${userName} in Firestore:`, e);
+        this.handleFirestoreError(e, `deleteNode for ${userName}`);
       }
     }
   }
@@ -1353,11 +1445,11 @@ class DataService {
     this.notifyEdgeListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await setDoc(doc(db, "users", userName, "edges", edge.id), edge);
       } catch (e) {
-        console.warn(`Failed to write edge for ${userName} to Firestore, saved locally:`, e);
+        this.handleFirestoreError(e, `saveEdge for ${userName}`);
       }
     }
   }
@@ -1368,52 +1460,89 @@ class DataService {
     this.notifyEdgeListeners();
 
     const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await deleteDoc(doc(db, "users", userName, "edges", id));
+        if (this.edges.length === 0) {
+          await setDoc(doc(db, "users", userName, "edges", "_placeholder"), {
+            placeholder: true,
+            updatedAt: new Date().toISOString()
+          });
+        }
       } catch (e) {
-        console.warn(`Failed to delete edge for ${userName} in Firestore:`, e);
+        this.handleFirestoreError(e, `deleteEdge for ${userName}`);
       }
     }
   }
 
   private async clearFirestoreNetwork(userName: string) {
+    if (this.isLocalOnly || this.isQuotaExhausted || !userName || userName === "global") return;
     try {
       const dimsRef = collection(db, "users", userName, "domains");
       const dimsSnap = await getDocs(dimsRef);
-      for (const d of dimsSnap.docs) {
-        await deleteDoc(d.ref);
-      }
 
       const nodesRef = collection(db, "users", userName, "nodes");
       const nodesSnap = await getDocs(nodesRef);
-      for (const n of nodesSnap.docs) {
-        await deleteDoc(n.ref);
-      }
 
       const edgesRef = collection(db, "users", userName, "edges");
       const edgesSnap = await getDocs(edgesRef);
-      for (let i = 0; i < edgesSnap.docs.length; i += 400) {
+
+      // Collect all sub-data documents to delete (keep placeholder so Firestore preserves collection containers)
+      const allDocsToDelete = [
+        ...dimsSnap.docs.filter((d) => d.id !== "_placeholder"),
+        ...nodesSnap.docs.filter((n) => n.id !== "_placeholder"),
+        ...edgesSnap.docs.filter((e) => e.id !== "_placeholder")
+      ];
+
+      // Delete sub-data in batches
+      for (let i = 0; i < allDocsToDelete.length; i += 400) {
         const batch = writeBatch(db);
-        const chunk = edgesSnap.docs.slice(i, i + 400);
+        const chunk = allDocsToDelete.slice(i, i + 400);
         chunk.forEach((docSnap) => batch.delete(docSnap.ref));
         await batch.commit();
       }
+
+      // Ensure placeholder documents exist so the collections 'domains', 'nodes', and 'edges'
+      // are permanently retained in Firestore without removing them from the user's hierarchy
+      const keepBatch = writeBatch(db);
+      keepBatch.set(doc(db, "users", userName, "domains", "_placeholder"), {
+        placeholder: true,
+        updatedAt: new Date().toISOString()
+      });
+      keepBatch.set(doc(db, "users", userName, "nodes", "_placeholder"), {
+        placeholder: true,
+        updatedAt: new Date().toISOString()
+      });
+      keepBatch.set(doc(db, "users", userName, "edges", "_placeholder"), {
+        placeholder: true,
+        updatedAt: new Date().toISOString()
+      });
+      await keepBatch.commit();
     } catch (e) {
-      console.warn(`Failed to clear Firestore network for ${userName}:`, e);
+      this.handleFirestoreError(e, `clearFirestoreNetwork for ${userName}`);
     }
   }
 
   public async clearNetwork() {
-    this.domains = [];
-    this.nodes = [];
-    this.edges = [];
-    this.saveToLocalStorageOnly();
-    this.notifyAll();
+    this.isClearing = true;
+    try {
+      this.domains = [];
+      this.nodes = [];
+      this.edges = [];
+      this.saveToLocalStorageOnly();
+      this.notifyAll();
 
-    const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
-      await this.clearFirestoreNetwork(userName);
+      const userName = this.getCurrentUserName();
+      if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
+        await this.clearFirestoreNetwork(userName);
+      }
+    } finally {
+      this.isClearing = false;
+      this.domains = [];
+      this.nodes = [];
+      this.edges = [];
+      this.saveToLocalStorageOnly();
+      this.notifyAll();
     }
   }
 
@@ -1438,34 +1567,179 @@ class DataService {
       console.error("Failed to save custom config to local storage:", e);
     }
 
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
         await setDoc(doc(db, "users", userName, "saved_config", "latest"), config);
       } catch (e) {
-        console.warn(`Failed to write saved config for ${userName} to Firestore:`, e);
+        this.handleFirestoreError(e, `saveCustomNetworkConfig for ${userName}`);
       }
     }
   }
 
-  public async getCustomNetworkConfig(): Promise<SavedNetworkConfig | null> {
-    const userName = this.getCurrentUserName();
+  public async getCustomNetworkConfig(targetUserName?: string): Promise<SavedNetworkConfig | null> {
+    const rawTarget = targetUserName || this.getCurrentUserName();
+    const cleanUserName = (rawTarget || "").trim();
 
-    if (!this.isLocalOnly && userName && userName !== "global") {
+    if (cleanUserName && cleanUserName !== "global") {
       try {
-        const snap = await getDoc(doc(db, "users", userName, "saved_config", "latest"));
-        if (snap.exists()) {
-          return snap.data() as SavedNetworkConfig;
+        const candidates = [cleanUserName, cleanUserName.toLowerCase()];
+        if (cleanUserName.toLowerCase() === "user3") {
+          candidates.push("jorTdhQZINafzcumb5tCjhzmgr12");
+        }
+        if (cleanUserName.toLowerCase() === "user4") {
+          candidates.push("fDpHiKWT8pWeNH78zTAv53ESNqD2");
+        }
+        if (this.currentUser?.uid && !candidates.includes(this.currentUser.uid)) {
+          candidates.push(this.currentUser.uid);
+        }
+
+        // 1. Direct candidate ID lookup for saved_config/latest
+        for (const c of candidates) {
+          try {
+            const snap = await getDoc(doc(db, "users", c, "saved_config", "latest"));
+            if (snap.exists()) {
+              const data = snap.data() as SavedNetworkConfig;
+              if (data && data.domains && data.domains.length > 0) {
+                return data;
+              }
+            }
+          } catch (err: any) {
+            console.warn(`Could not read saved_config/latest for candidate ${c}:`, err?.message);
+          }
+        }
+
+        // 2. Query users collection to resolve mapped UIDs (e.g. jorTdhQZINafzcumb5tCjhzmgr12 -> user3)
+        try {
+          const usersSnap = await getDocs(collection(db, "users"));
+          for (const uDoc of usersSnap.docs) {
+            const uData = uDoc.data();
+            const matches =
+              uDoc.id.toLowerCase() === cleanUserName.toLowerCase() ||
+              uData?.userName?.toLowerCase() === cleanUserName.toLowerCase() ||
+              uData?.name?.toLowerCase() === cleanUserName.toLowerCase() ||
+              uData?.email?.toLowerCase() === `${cleanUserName.toLowerCase()}@network.org` ||
+              uData?.email?.toLowerCase().startsWith(`${cleanUserName.toLowerCase()}@`);
+            if (matches) {
+              const snap = await getDoc(doc(db, "users", uDoc.id, "saved_config", "latest"));
+              if (snap.exists()) {
+                const data = snap.data() as SavedNetworkConfig;
+                if (data && data.domains && data.domains.length > 0) {
+                  return data;
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          console.warn(`Could not scan users collection for ${cleanUserName}:`, err?.message);
+        }
+
+        // 3. Check any doc in saved_config subcollection
+        for (const c of candidates) {
+          try {
+            const collSnap = await getDocs(collection(db, "users", c, "saved_config"));
+            if (!collSnap.empty) {
+              for (const docSnap of collSnap.docs) {
+                const data = docSnap.data() as SavedNetworkConfig;
+                if (data && data.domains && data.domains.length > 0) {
+                  return data;
+                }
+              }
+            }
+          } catch (err: any) {
+            console.warn(`Could not read saved_config collection for ${c}:`, err?.message);
+          }
+        }
+
+        // 4. Check if live Firestore network (domains, nodes, edges) exists for candidate
+        for (const c of candidates) {
+          try {
+            const dimsSnap = await getDocs(collection(db, "users", c, "domains"));
+            const dList: Domain[] = [];
+            dimsSnap.forEach((d) => {
+              if (d.id.startsWith("_")) return;
+              const data = d.data() as Domain;
+              if ((data as any).placeholder) return;
+              dList.push(data);
+            });
+            dList.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+            const nodesSnap = await getDocs(collection(db, "users", c, "nodes"));
+            const nList: NodeIndicator[] = [];
+            nodesSnap.forEach((n) => {
+              if (n.id.startsWith("_")) return;
+              const data = n.data() as NodeIndicator;
+              if ((data as any).placeholder) return;
+              nList.push(data);
+            });
+
+            const edgesSnap = await getDocs(collection(db, "users", c, "edges"));
+            const eList: Edge[] = [];
+            edgesSnap.forEach((e) => {
+              if (e.id.startsWith("_")) return;
+              const data = e.data() as Edge;
+              if ((data as any).placeholder) return;
+              eList.push(data);
+            });
+
+            let p = { ...this.params };
+            try {
+              const pSnap = await getDoc(doc(db, "users", c, "params", "default"));
+              if (pSnap.exists()) {
+                p = pSnap.data() as any;
+              }
+            } catch {}
+
+            if (dList.length > 0 && nList.length > 0) {
+                // Determine savedAt from user metadata or fallback rather than generating current timestamp
+                let recordedTime = "";
+                try {
+                  const uSnap = await getDoc(doc(db, "users", c));
+                  if (uSnap.exists()) {
+                    const uData = uSnap.data();
+                    if (uData?.updatedAt) {
+                      recordedTime = new Date(uData.updatedAt).toLocaleString();
+                    } else if (uData?.createdAt) {
+                      recordedTime = new Date(uData.createdAt).toLocaleString();
+                    }
+                  }
+                } catch {}
+
+                return {
+                  name: `${cleanUserName} Active Network`,
+                  savedAt: recordedTime || "Original Setup",
+                  domains: dList,
+                  nodes: nList,
+                  edges: eList,
+                  params: p
+                };
+              }
+          } catch (err: any) {
+            console.warn(`Could not read live network subcollections for ${c}:`, err?.message);
+          }
         }
       } catch (e) {
-        console.warn(`Failed to read saved config for ${userName} from Firestore, falling back to local:`, e);
+        console.warn(`Firestore read attempt failed for ${cleanUserName}:`, e);
       }
     }
 
+    // 5. Local storage fallback
     try {
       const keys = this.getLocalStorageKeys();
-      const saved = localStorage.getItem(keys.savedConfig);
-      if (saved) {
-        return JSON.parse(saved) as SavedNetworkConfig;
+      const localKeysToTry = [
+        `network_saved_config_${cleanUserName.toLowerCase()}`,
+        `network_saved_config_${cleanUserName}`,
+        keys.savedConfig,
+        `ursa_saved_config_${cleanUserName.toLowerCase()}`,
+        "ursa_saved_config"
+      ];
+      for (const k of localKeysToTry) {
+        const saved = localStorage.getItem(k);
+        if (saved) {
+          const parsed = JSON.parse(saved) as SavedNetworkConfig;
+          if (parsed && parsed.domains && parsed.domains.length > 0) {
+            return parsed;
+          }
+        }
       }
     } catch (e) {
       console.error("Failed to read saved config from local storage:", e);
@@ -1474,99 +1748,153 @@ class DataService {
     return null;
   }
 
+  public async restoreSavedConfigFromFirestore(targetUserName?: string): Promise<SavedNetworkConfig> {
+    const userName = (targetUserName || this.getCurrentUserName()).trim();
+    const config = await this.getCustomNetworkConfig(userName);
+    if (!config || !config.domains || config.domains.length === 0) {
+      throw new Error(`No saved configuration found for user "${userName}" under 'saved_config --> latest'. Please save a configuration first or upload a JSON backup.`);
+    }
+    await this.restoreCustomNetworkConfig(config);
+    return config;
+  }
+
   public async restoreCustomNetworkConfig(config: SavedNetworkConfig): Promise<void> {
-    const normalizedNodes = config.nodes.map(node => ({
-      ...node,
-      id: node.abbr.toUpperCase(),
-      abbr: node.abbr.toUpperCase()
-    }));
+    if (!config || !config.domains || !config.nodes) {
+      throw new Error("Invalid network configuration format.");
+    }
 
-    this.domains = [...config.domains];
-    this.nodes = normalizedNodes;
-    this.edges = [...config.edges];
-    this.params = { ...config.params };
+    this.isRestoring = true;
 
-    this.saveToLocalStorageOnly();
-    this.notifyAll();
+    try {
+      const normalizedNodes = (config.nodes || []).map(node => ({
+        ...node,
+        id: node.abbr.toUpperCase(),
+        abbr: node.abbr.toUpperCase()
+      }));
 
-    const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
+      this.domains = [...(config.domains || [])];
+      this.nodes = normalizedNodes;
+      this.edges = [...(config.edges || [])];
+      this.params = config.params ? { ...config.params } : { ...this.params };
+
+      const userName = this.getCurrentUserName();
+      this.saveToLocalStorageOnly();
+
+      // Persist config backup to local storage
+      const keys = this.getLocalStorageKeys();
+
+      // Crucial: preserve the time at which the backup was made; NEVER overwrite with current load/restore time
+      const rawSavedAt =
+        config.savedAt ||
+        (config as any).createdAt ||
+        (config as any).timestamp ||
+        (config as any).saved_at ||
+        (config as any).created_at ||
+        (config as any).date;
+
+      const preservedSavedAt =
+        typeof rawSavedAt === "string" && rawSavedAt.trim()
+          ? rawSavedAt.trim()
+          : typeof rawSavedAt === "number"
+          ? new Date(rawSavedAt).toLocaleString()
+          : new Date().toLocaleString();
+
+      const configToSave: SavedNetworkConfig = {
+        name: config.name || "Restored Network",
+        savedAt: preservedSavedAt,
+        domains: [...this.domains],
+        nodes: [...this.nodes],
+        edges: [...this.edges],
+        params: { ...this.params }
+      };
+
       try {
-        await this.clearFirestoreNetwork(userName);
-
-        for (const domain of config.domains) {
-          await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
-        }
-        for (const node of normalizedNodes) {
-          await setDoc(doc(db, "users", userName, "nodes", node.id), node);
-        }
-        for (let i = 0; i < config.edges.length; i += 400) {
-          const edgeBatch = writeBatch(db);
-          const chunk = config.edges.slice(i, i + 400);
-          chunk.forEach((edge) => {
-            edgeBatch.set(doc(db, "users", userName, "edges", edge.id), edge);
-          });
-          await edgeBatch.commit();
-        }
-        await setDoc(doc(db, "users", userName, "params", "default"), config.params);
+        localStorage.setItem(keys.savedConfig, JSON.stringify(configToSave));
+        localStorage.setItem("ursa_saved_config", JSON.stringify(configToSave));
       } catch (e) {
-        console.warn(`Syncing restored config to Firestore failed for ${userName}:`, e);
+        console.warn("Failed to update saved config in local storage during restore:", e);
       }
+
+      if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
+        try {
+          await this.clearFirestoreNetwork(userName);
+
+          for (const domain of this.domains) {
+            await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
+          }
+          for (const node of normalizedNodes) {
+            await setDoc(doc(db, "users", userName, "nodes", node.id), node);
+          }
+          for (let i = 0; i < this.edges.length; i += 400) {
+            const edgeBatch = writeBatch(db);
+            const chunk = this.edges.slice(i, i + 400);
+            chunk.forEach((edge) => {
+              edgeBatch.set(doc(db, "users", userName, "edges", edge.id), edge);
+            });
+            await edgeBatch.commit();
+          }
+          if (this.params) {
+            await setDoc(doc(db, "users", userName, "params", "default"), this.params);
+          }
+          await setDoc(doc(db, "users", userName, "saved_config", "latest"), configToSave);
+        } catch (e) {
+          this.handleFirestoreError(e, `sync restored config for ${userName}`);
+        }
+      }
+    } finally {
+      this.isRestoring = false;
+      this.notifyAll();
+      this.saveToLocalStorageOnly();
     }
   }
 
   public async importDefaultNetwork() {
-    await this.clearNetwork();
-    this.loadDefaults();
-    this.saveToLocalStorageOnly();
-    this.notifyAll();
+    this.isRestoring = true;
+    try {
+      this.loadDefaults();
+      this.saveToLocalStorageOnly();
+      this.notifyAll();
 
-    const userName = this.getCurrentUserName();
-    if (!this.isLocalOnly && userName && userName !== "global") {
-      try {
-        const isAdmin = this.isUserAdmin(userName);
-        const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
-        const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map(node => ({
-          ...node,
-          id: node.abbr.toUpperCase(),
-          abbr: node.abbr.toUpperCase()
-        }));
-        const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
-        const paramsToLoad = isAdmin ? DEFAULT_PARAMS : SIMPLE_PARAMS;
+      const userName = this.getCurrentUserName();
+      if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
+        try {
+          const isAdmin = this.isUserAdmin(userName);
+          const domainsToLoad = isAdmin ? DEFAULT_DOMAINS : SIMPLE_DOMAINS;
+          const nodesToLoad = (isAdmin ? DEFAULT_NODES : SIMPLE_NODES).map(node => ({
+            ...node,
+            id: node.abbr.toUpperCase(),
+            abbr: node.abbr.toUpperCase()
+          }));
+          const edgesToLoad = isAdmin ? parseDefaultEdges() : parseSimpleEdges();
+          const paramsToLoad = isAdmin ? DEFAULT_PARAMS : SIMPLE_PARAMS;
 
-        // Clear out any obsolete Firestore documents first (crucial if non-admin previously had 40 nodes)
-        const dimsSnap = await getDocs(collection(db, "users", userName, "domains"));
-        for (const d of dimsSnap.docs) {
-          await deleteDoc(d.ref);
-        }
-        const nodesSnap = await getDocs(collection(db, "users", userName, "nodes"));
-        for (const n of nodesSnap.docs) {
-          await deleteDoc(n.ref);
-        }
-        const edgesSnap = await getDocs(collection(db, "users", userName, "edges"));
-        for (const e of edgesSnap.docs) {
-          await deleteDoc(e.ref);
-        }
+          // Clear out any obsolete Firestore documents first while preserving collection containers
+          await this.clearFirestoreNetwork(userName);
 
-        for (const domain of domainsToLoad) {
-          await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
+          for (const domain of domainsToLoad) {
+            await setDoc(doc(db, "users", userName, "domains", domain.id), domain);
+          }
+          for (const node of nodesToLoad) {
+            await setDoc(doc(db, "users", userName, "nodes", node.id), node);
+          }
+          for (let i = 0; i < edgesToLoad.length; i += 400) {
+            const edgeBatch = writeBatch(db);
+            const chunk = edgesToLoad.slice(i, i + 400);
+            chunk.forEach((edge) => {
+              edgeBatch.set(doc(db, "users", userName, "edges", edge.id), edge);
+            });
+            await edgeBatch.commit();
+          }
+          await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
+          console.log(`Default network successfully imported for user: ${userName} (${isAdmin ? 40 : 16} nodes)`);
+        } catch (e) {
+          this.handleFirestoreError(e, `importDefaultNetwork for ${userName}`);
         }
-        for (const node of nodesToLoad) {
-          await setDoc(doc(db, "users", userName, "nodes", node.id), node);
-        }
-        for (let i = 0; i < edgesToLoad.length; i += 400) {
-          const edgeBatch = writeBatch(db);
-          const chunk = edgesToLoad.slice(i, i + 400);
-          chunk.forEach((edge) => {
-            edgeBatch.set(doc(db, "users", userName, "edges", edge.id), edge);
-          });
-          await edgeBatch.commit();
-        }
-        await setDoc(doc(db, "users", userName, "params", "default"), paramsToLoad);
-        console.log(`Default network successfully imported for user: ${userName} (${isAdmin ? 40 : 16} nodes)`);
-      } catch (e) {
-        console.warn(`Importing default network to Firestore failed for ${userName}:`, e);
       }
+    } finally {
+      this.isRestoring = false;
+      this.saveToLocalStorageOnly();
+      this.notifyAll();
     }
   }
 }

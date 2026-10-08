@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Domain, NodeIndicator, Edge, SavedNetworkConfig, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
 import { dataService } from "../dataService";
-import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award, Download, FileSpreadsheet, Image as ImageIcon } from "lucide-react";
+import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award, Download, FileSpreadsheet, Image as ImageIcon, User } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { auth } from "../firebase";
 import { generateStaticNetworkSvg } from "../lib/simulationClient";
@@ -15,9 +15,27 @@ export default function ConfigPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
+    const mergeUser = (firebaseUser: any) => {
+      const localStr = localStorage.getItem("ursa_local_user");
+      let localObj: any = null;
+      if (localStr) {
+        try { localObj = JSON.parse(localStr); } catch {}
+      }
+      if (firebaseUser) {
+        const uName = localObj?.userName || (firebaseUser.email ? firebaseUser.email.split("@")[0] : "");
+        return {
+          ...firebaseUser,
+          userName: uName,
+          displayName: localObj?.displayName || firebaseUser.displayName || uName,
+          role: localObj?.role || (uName === "admin" ? "admin" : "user")
+        };
+      }
+      return localObj;
+    };
+
     const userObj = auth.currentUser;
     if (userObj) {
-      setCurrentUser(userObj);
+      setCurrentUser(mergeUser(userObj));
     } else {
       const localUser = localStorage.getItem("ursa_local_user");
       if (localUser) {
@@ -31,7 +49,7 @@ export default function ConfigPage() {
 
     const unsubAuth = auth.onAuthStateChanged((u) => {
       if (u) {
-        setCurrentUser(u);
+        setCurrentUser(mergeUser(u));
       } else {
         const localUser = localStorage.getItem("ursa_local_user");
         if (localUser) {
@@ -76,23 +94,54 @@ export default function ConfigPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [networkScale, setNetworkScale] = useState(80);
 
+  // Active user identification
+  const currentUserName = dataService.getCurrentUserName();
+  const activeUserKey = (currentUser?.userName || (currentUserName !== "global" ? currentUserName : (currentUser?.email ? currentUser.email.split("@")[0] : "user1"))).trim();
+
   // Saved custom configuration states
   const [savedConfig, setSavedConfig] = useState<SavedNetworkConfig | null>(null);
   const [saveName, setSaveName] = useState("");
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
 
+  // Target user profile for restoring saved config (the active logged-in user)
+  const [userPreviewConfig, setUserPreviewConfig] = useState<SavedNetworkConfig | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const config = await dataService.getCustomNetworkConfig();
+        const target = activeUserKey || "user1";
+        const config = await dataService.getCustomNetworkConfig(target);
         setSavedConfig(config);
       } catch (err) {
         console.warn("Failed to fetch saved config:", err);
       }
     };
     fetchConfig();
-  }, [currentUser, isLocal]);
+  }, [currentUser, isLocal, activeUserKey]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchPreview = async () => {
+      const target = activeUserKey || "user1";
+      setPreviewLoading(true);
+      try {
+        const config = await dataService.getCustomNetworkConfig(target);
+        if (active) {
+          setUserPreviewConfig(config);
+        }
+      } catch (err) {
+        if (active) setUserPreviewConfig(null);
+      } finally {
+        if (active) setPreviewLoading(false);
+      }
+    };
+    if (isLoadModalOpen) {
+      fetchPreview();
+    }
+    return () => { active = false; };
+  }, [isLoadModalOpen, activeUserKey]);
 
   // CRUD Form States - Domains
   const [domainForm, setDomainForm] = useState({ id: "", name: "" });
@@ -527,6 +576,9 @@ export default function ConfigPage() {
         setLoading(true);
         try {
           await dataService.clearNetwork();
+          setDomains([]);
+          setNodes([]);
+          setEdges([]);
           showFeedback("All network domains, nodes, and edges have been removed.", "success");
         } catch (err: any) {
           console.error(err);
@@ -817,8 +869,6 @@ export default function ConfigPage() {
            tName.toLowerCase().includes(query);
   });
 
-  const currentUserName = dataService.getCurrentUserName();
-  const activeUserKey = currentUser?.userName || (currentUserName !== "global" ? currentUserName : (currentUser?.email ? currentUser.email : ""));
   let modeSuffix = "";
   if (activeUserKey === "user1") {
     modeSuffix = " (Mode A)";
@@ -889,6 +939,7 @@ export default function ConfigPage() {
             disabled={loading}
             className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-60"
             id="restore-network-btn"
+            title="Import or restore network configuration from Firestore or backup"
           >
             <FolderOpen size={13} className={loading ? "animate-spin" : ""} />
             Import / Restore
@@ -2005,22 +2056,50 @@ export default function ConfigPage() {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-sans focus:ring-1 focus:ring-slate-900 focus:outline-none"
                 />
               </div>
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setIsSaveModalOpen(false);
                     setSaveName("");
                   }}
-                  className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                  className="px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
+                  onClick={async () => {
+                    const currentName = saveName.trim() || "Network Backup";
+                    try {
+                      await dataService.saveCustomNetworkConfig(currentName);
+                      const config = await dataService.getCustomNetworkConfig();
+                      if (config) {
+                        const jsonStr = JSON.stringify(config, null, 2);
+                        const blob = new Blob([jsonStr], { type: "application/json" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `ursa_network_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        showFeedback("Backup JSON downloaded and saved successfully!", "success");
+                      }
+                    } catch (err: any) {
+                      showFeedback(`Download failed: ${err.message}`, "error");
+                    }
+                  }}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Download size={13} />
+                  Download JSON
+                </button>
+                <button
                   type="submit"
                   disabled={!saveName.trim()}
-                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
+                  <Save size={13} />
                   Save Configuration
                 </button>
               </div>
@@ -2032,106 +2111,199 @@ export default function ConfigPage() {
       {/* Import / Restore Network Modal */}
       {isLoadModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden p-6 relative space-y-4 animate-scale-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-xl w-full overflow-hidden p-6 relative space-y-5 animate-scale-in max-h-[92vh] overflow-y-auto">
+            {/* Header */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center border border-indigo-100">
+              <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center border border-indigo-100 shrink-0">
                 <FolderOpen size={18} className="text-indigo-600" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900 font-sans">Import & Restore Network</h3>
-                <p className="text-[11px] text-slate-400">Choose a default network structure or restore your last saved configuration.</p>
+                <h3 className="text-sm font-bold text-slate-900 font-sans">Import / Restore Network</h3>
+                <p className="text-[11px] text-slate-500">Restore your saved network configuration from Firestore (<span className="font-mono text-indigo-600 font-bold">saved_config &rarr; latest</span>), or import a JSON backup file.</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {/* Option 1: System Default */}
-              <div className="border border-slate-200 hover:border-indigo-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-slate-50/50 hover:bg-indigo-50/10 transition-all">
-                <div className="space-y-1.5">
+            {/* Primary Action Card: Firestore saved_config -> latest for current user */}
+            <div className="border-2 border-emerald-500/40 bg-emerald-50/20 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <h4 className="text-xs font-bold text-slate-900 font-sans">
+                    Firestore Path: <span className="font-mono text-emerald-800 font-semibold">users/{activeUserKey}/saved_config/latest</span>
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200 self-start sm:self-auto">
+                  Cloud Document
+                </span>
+              </div>
+
+              {previewLoading ? (
+                <div className="py-4 flex items-center justify-center gap-2 text-slate-500 text-xs font-mono">
+                  <RefreshCw size={14} className="animate-spin text-emerald-600" />
+                  Loading your latest configuration from Firestore...
+                </div>
+              ) : userPreviewConfig ? (
+                <div className="bg-white border border-emerald-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-900 block font-sans">
+                        "{userPreviewConfig.name || "Latest Configuration"}"
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Saved: {userPreviewConfig.savedAt || "Available in Firestore"}
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-semibold rounded-md border border-emerald-200 font-mono">
+                      Cloud Backup Ready
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-center font-mono text-[10px]">
+                    <div className="bg-slate-50 p-1.5 rounded-md border border-slate-100">
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Indicators (Nodes)</span>
+                      <span className="font-bold text-slate-800 text-xs">{userPreviewConfig.nodes?.length || 0}</span>
+                    </div>
+                    <div className="bg-slate-50 p-1.5 rounded-md border border-slate-100">
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Domains</span>
+                      <span className="font-bold text-slate-800 text-xs">{userPreviewConfig.domains?.length || 0}</span>
+                    </div>
+                    <div className="bg-slate-50 p-1.5 rounded-md border border-slate-100">
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Directed Edges</span>
+                      <span className="font-bold text-slate-800 text-xs">{userPreviewConfig.edges?.length || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertTriangle size={13} className="text-amber-600" />
+                    No saved configuration document found for "{activeUserKey}"
+                  </div>
+                  <p className="text-[11px] text-amber-800">
+                    Save a configuration first using "Save Backup" or import a JSON backup file below.
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsLoadModalOpen(false);
+                  setLoading(true);
+                  try {
+                    const target = activeUserKey || "user1";
+                    const restored = await dataService.restoreSavedConfigFromFirestore(target);
+                    setSavedConfig(restored);
+                    showFeedback(`Successfully restored your latest configuration ("${restored.name || "latest"}") with ${restored.nodes.length} nodes, ${restored.domains.length} domains, and ${restored.edges.length} edges from Firestore!`, "success");
+                  } catch (err: any) {
+                    showFeedback(`Restore failed: ${err.message}`, "error");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={previewLoading || !userPreviewConfig}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                id="modal-restore-firestore-btn"
+              >
+                <Save size={14} />
+                Restore from Firestore (saved_config &rarr; latest)
+              </button>
+            </div>
+
+            {/* Secondary Options */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              {/* Option 2: Import JSON File */}
+              <div className="border border-slate-200 hover:border-violet-200 rounded-xl p-3 flex flex-col justify-between space-y-2 bg-slate-50/50 hover:bg-violet-50/10 transition-all">
+                <div className="space-y-1">
                   <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                    System Default Network
+                    <span className="w-2 h-2 rounded-full bg-violet-500"></span>
+                    Import JSON File Backup
                   </h4>
                   <p className="text-[10px] text-slate-500 leading-relaxed">
-                    Resets the entire canvas to the standard city resilience configuration designed for your account profile role.
+                    Upload a previously exported `.json` configuration file from disk.
+                  </p>
+                </div>
+                <label className="w-full py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                  <Download size={12} className="rotate-180" />
+                  Import JSON File
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setIsLoadModalOpen(false);
+                      const reader = new FileReader();
+                      reader.onload = async (event) => {
+                        try {
+                          const parsed = JSON.parse(event.target?.result as string);
+                          if (!parsed || !parsed.domains || !parsed.nodes) {
+                            throw new Error("Invalid network configuration file. Missing domains or nodes.");
+                          }
+                          // Ensure backup creation timestamp is preserved from file or file attributes
+                          if (!parsed.savedAt) {
+                            const candidateTime =
+                              parsed.createdAt ||
+                              parsed.timestamp ||
+                              parsed.saved_at ||
+                              parsed.created_at ||
+                              parsed.date ||
+                              (file.lastModified ? new Date(file.lastModified).toLocaleString() : undefined);
+                            if (candidateTime) {
+                              parsed.savedAt = String(candidateTime);
+                            }
+                          }
+                          setLoading(true);
+                          await dataService.restoreCustomNetworkConfig(parsed);
+                          const updated = await dataService.getCustomNetworkConfig();
+                          setSavedConfig(updated);
+                          showFeedback(`Network configuration "${parsed.name || file.name}" imported and restored successfully!`, "success");
+                        } catch (err: any) {
+                          showFeedback(`Import failed: ${err.message}`, "error");
+                        } finally {
+                          setLoading(false);
+                        }
+                      };
+                      reader.readAsText(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              {/* Option 3: Standard Default */}
+              <div className="border border-slate-200 hover:border-slate-300 rounded-xl p-3 flex flex-col justify-between space-y-2 bg-slate-50/50 transition-all">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    Reset Canvas to Default
+                  </h4>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Resets canvas to generic template (4 domains, 16 nodes).
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => {
                     setIsLoadModalOpen(false);
                     handleImportDefaultNetwork();
                   }}
-                  className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <RefreshCw size={12} />
-                  Load Default
-                </button>
-              </div>
-
-              {/* Option 2: Saved Config */}
-              <div className="border border-slate-200 hover:border-emerald-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-slate-50/50 hover:bg-emerald-50/10 transition-all">
-                <div className="space-y-1.5">
-                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    Last Saved Config
-                  </h4>
-                  {savedConfig ? (
-                    <div className="space-y-1">
-                      <p className="text-[11px] font-semibold text-emerald-800 line-clamp-1">
-                        "{savedConfig.name}"
-                      </p>
-                      <p className="text-[9px] text-slate-400">
-                        Saved: {savedConfig.savedAt}
-                      </p>
-                      <p className="text-[9px] text-slate-500 leading-relaxed">
-                        Restores your custom indicators, domains, weights, and parameters.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-slate-400 italic py-2">
-                      No saved configuration found. Save your network first.
-                    </p>
-                  )}
-                </div>
-                <button
-                  disabled={!savedConfig}
-                  onClick={() => {
-                    setIsLoadModalOpen(false);
-                    if (!savedConfig) return;
-                    setModal({
-                      isOpen: true,
-                      title: "Restore Saved Configuration?",
-                      message: `Are you sure you want to restore the saved configuration "${savedConfig.name}"? This will replace all active domains, nodes, and edges.`,
-                      confirmText: "Restore",
-                      cancelText: "Cancel",
-                      type: "success",
-                      onConfirm: async () => {
-                        closeModal();
-                        setLoading(true);
-                        try {
-                          await dataService.restoreCustomNetworkConfig(savedConfig);
-                          showFeedback(`Configuration "${savedConfig.name}" restored successfully!`, "success");
-                        } catch (err: any) {
-                          showFeedback(`Restore failed: ${err.message}`, "error");
-                        } finally {
-                          setLoading(false);
-                        }
-                      }
-                    });
-                  }}
-                  className="w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <Save size={12} />
-                  Restore Saved
+                  Reset to Default
                 </button>
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
+            {/* Modal Footer */}
+            <div className="flex justify-end pt-1">
               <button
+                type="button"
                 onClick={() => setIsLoadModalOpen(false)}
                 className="px-4 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
               >
-                Cancel
+                Close
               </button>
             </div>
           </div>
