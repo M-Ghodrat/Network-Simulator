@@ -92,7 +92,7 @@ export default function ConfigPage() {
   const [metricNodeSearch, setMetricNodeSearch] = useState("");
   const [sortBy, setSortBy] = useState<"id" | "inDegree" | "outDegree" | "betweenness">("id");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const [networkScale, setNetworkScale] = useState(80);
+  const [networkScale, setNetworkScale] = useState(100);
 
   // Active user identification
   const currentUserName = dataService.getCurrentUserName();

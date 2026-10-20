@@ -71,23 +71,40 @@ def edge_betweenness_centrality_pure(nodes, edges):
     return eb
 
 
-def get_node_color(stability):
-    """Interpolates RdYlGn colormap in pure Python."""
-    # RdYlGn approximate colors:
-    # 0.0 -> Red (215, 48, 39)
-    # 0.5 -> Yellow (254, 224, 139)
-    # 1.0 -> Green (26, 152, 80)
-    if stability < 0.5:
-        f = stability / 0.5
-        r = int(215 + (254 - 215) * f)
-        g = int(48 + (224 - 48) * f)
-        b = int(39 + (139 - 39) * f)
+def get_node_style(stability):
+    """Option 1: Executive Dual-Tone (Soft Light Face + Saturated Solid Border + Deep Pigment Text)."""
+    clamped = max(0.0, min(1.0, float(stability)))
+    if clamped < 0.5:
+        f = clamped / 0.5
+        r_f = int(255 + (255 - 255) * f)
+        g_f = int(241 + (251 - 241) * f)
+        b_f = int(242 + (235 - 242) * f)
+        r_b = int(225 + (217 - 225) * f)
+        g_b = int(29 + (119 - 29) * f)
+        b_b = int(72 + (6 - 72) * f)
+        r_t = int(136 + (120 - 136) * f)
+        g_t = int(19 + (53 - 19) * f)
+        b_t = int(55 + (15 - 55) * f)
     else:
-        f = (stability - 0.5) / 0.5
-        r = int(254 + (26 - 254) * f)
-        g = int(224 + (152 - 224) * f)
-        b = int(139 + (80 - 139) * f)
-    return f"rgb({r},{g},{b})"
+        f = (clamped - 0.5) / 0.5
+        r_f = int(255 + (236 - 255) * f)
+        g_f = int(251 + (253 - 251) * f)
+        b_f = int(235 + (245 - 235) * f)
+        r_b = int(217 + (5 - 217) * f)
+        g_b = int(119 + (150 - 119) * f)
+        b_b = int(6 + (105 - 6) * f)
+        r_t = int(120 + (6 - 120) * f)
+        g_t = int(53 + (78 - 53) * f)
+        b_t = int(15 + (59 - 15) * f)
+    return {
+        "face": f"rgb({r_f},{g_f},{b_f})",
+        "border": f"rgb({r_b},{g_b},{b_b})",
+        "text": f"rgb({r_t},{g_t},{b_t})"
+    }
+
+
+def get_node_color(stability):
+    return get_node_style(stability)["face"]
 
 
 def generate_svg_plot(nodes_data, edges_data, dimensions_data, history, t, pos, centers, dimensions_list, nodes_dim):
@@ -115,11 +132,10 @@ def generate_svg_plot(nodes_data, edges_data, dimensions_data, history, t, pos, 
     </marker>
     <marker id="arrow-same" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8" />
-    </marker>
     <linearGradient id="colorbar-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="rgb(215,48,39)" />
-      <stop offset="50%" stop-color="rgb(254,224,139)" />
-      <stop offset="100%" stop-color="rgb(26,152,80)" />
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="50%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#059669" />
     </linearGradient>
   </defs>''')
     
@@ -227,12 +243,11 @@ def generate_svg_plot(nodes_data, edges_data, dimensions_data, history, t, pos, 
         sx, sy = x * scale, y * scale
         
         stability = history[abbr][t]
-        node_color = get_node_color(stability)
-        text_color = "#0f172a" if (stability > 0.35 and stability < 0.65) else "#ffffff"
+        style = get_node_style(stability)
         
         is_two_lines = len(abbr) > 4
         radius = 0.68 * scale if is_two_lines else (0.58 * scale if len(abbr) > 2 else 0.54 * scale)
-        svg_elements.append(f'  <circle cx="{sx:.2f}" cy="{sy:.2f}" r="{radius:.2f}" fill="{node_color}" stroke="#0f172a" stroke-width="0.8" />')
+        svg_elements.append(f'  <circle cx="{sx:.2f}" cy="{sy:.2f}" r="{radius:.2f}" fill="{style["face"]}" stroke="{style["border"]}" stroke-width="1.3" />')
         
         if is_two_lines:
             hyphen_idx = abbr.find("-")
@@ -249,18 +264,18 @@ def generate_svg_plot(nodes_data, edges_data, dimensions_data, history, t, pos, 
                 
             font_size = 5.2
             line_offset = 2.9
-            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy - line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line1_text)}</text>')
-            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy + line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line2_text)}</text>')
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy - line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{style["text"]}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line1_text)}</text>')
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy + line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{style["text"]}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line2_text)}</text>')
         else:
             font_size = 6.8 if len(abbr) <= 2 else 5.8
-            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{safe_abbr}</text>')
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{style["text"]}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{safe_abbr}</text>')
 
     # Colorbar at the bottom
     svg_elements.append('''  <g>
     <rect x="-70" y="200" width="140" height="7" fill="url(#colorbar-grad)" rx="1.5" />
-    <text x="-70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">0.0 (Worst)</text>
+    <text x="-70" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#e11d48" text-anchor="middle">0.0 (Worst)</text>
     <text x="0" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">Indicator Stability (Sv)</text>
-    <text x="70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">1.0 (Best)</text>
+    <text x="70" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#059669" text-anchor="middle">1.0 (Best)</text>
   </g>''')
   
     svg_elements.append('</svg>')
@@ -685,10 +700,7 @@ def run_simulation():
                 abbr = node.get("abbr")
                 x, y = pos[abbr]
                 stability = history[abbr][t]
-                node_color = cmap(stability)
-
-                # High-contrast text color and un-bold normal font weight
-                txt_color = '#0f172a' if (0.35 < stability < 0.65) else '#ffffff'
+                style = get_node_style(stability)
                 
                 is_two = len(abbr) > 4
                 if is_two:
@@ -707,9 +719,9 @@ def run_simulation():
                     r = 0.50 if len(abbr) > 2 else 0.46
                     fsize = 7.5 if len(abbr) <= 2 else 6.8
 
-                circle = plt.Circle((x, y), radius=r, facecolor=node_color, edgecolor='#0f172a', linewidth=0.8, zorder=3)
+                circle = plt.Circle((x, y), radius=r, facecolor=style["face"], edgecolor=style["border"], linewidth=1.2, zorder=3)
                 ax.add_patch(circle)
-                ax.text(x, y, display_text, color=txt_color, fontsize=fsize, fontweight='normal', ha='center', va='center', linespacing=0.9, zorder=4)
+                ax.text(x, y, display_text, color=style["text"], fontsize=fsize, fontweight='normal', ha='center', va='center', linespacing=0.9, zorder=4)
 
             sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
             sm.set_array([])

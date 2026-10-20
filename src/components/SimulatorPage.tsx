@@ -96,7 +96,7 @@ export default function SimulatorPage() {
   
   // Results table filter
   const [tableSearch, setTableSearch] = useState("");
-  const [imageScale, setImageScale] = useState(80);
+  const [imageScale, setImageScale] = useState(100);
 
   // Current parameter signature to detect when user modifies parameters
   const currentSignature = useMemo(() => {

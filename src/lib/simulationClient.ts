@@ -117,20 +117,38 @@ function edgeBetweennessCentrality(nodes: string[], edges: [string, string][]) {
   return eb;
 }
 
-function getNodeColor(stability: number) {
-  let r, g, b;
-  if (stability < 0.5) {
-    const f = stability / 0.5;
-    r = Math.floor(215 + (254 - 215) * f);
-    g = Math.floor(48 + (224 - 48) * f);
-    b = Math.floor(39 + (139 - 39) * f);
-  } else {
-    const f = (stability - 0.5) / 0.5;
-    r = Math.floor(254 + (26 - 254) * f);
-    g = Math.floor(224 + (152 - 224) * f);
-    b = Math.floor(139 + (80 - 139) * f);
-  }
+function interpolateRgb(c1: [number, number, number], c2: [number, number, number], f: number): string {
+  const r = Math.round(c1[0] + (c2[0] - c1[0]) * f);
+  const g = Math.round(c1[1] + (c2[1] - c1[1]) * f);
+  const b = Math.round(c1[2] + (c2[2] - c1[2]) * f);
   return `rgb(${r},${g},${b})`;
+}
+
+// Option 1: Executive Dual-Tone (Soft Light Face + Saturated Solid Border + Deep Pigment Text)
+// Critical (0.0): Face #FFF1F2 (255,241,242), Border #E11D48 (225,29,72), Text #881337 (136,19,55)
+// Degraded (0.5): Face #FFFBEB (255,251,235), Border #D97706 (217,119,6), Text #78350F (120,53,15)
+// Stable (1.0):   Face #ECFDF5 (236,253,245), Border #059669 (5,150,105),  Text #064E3B (6,78,59)
+export function getNodeStyle(stability: number): { face: string; border: string; text: string } {
+  const clamped = Math.max(0.0, Math.min(1.0, stability));
+  if (clamped < 0.5) {
+    const f = clamped / 0.5;
+    return {
+      face: interpolateRgb([255, 241, 242], [255, 251, 235], f),
+      border: interpolateRgb([225, 29, 72], [217, 119, 6], f),
+      text: interpolateRgb([136, 19, 55], [120, 53, 15], f)
+    };
+  } else {
+    const f = (clamped - 0.5) / 0.5;
+    return {
+      face: interpolateRgb([255, 251, 235], [236, 253, 245], f),
+      border: interpolateRgb([217, 119, 6], [5, 150, 105], f),
+      text: interpolateRgb([120, 53, 15], [6, 78, 59], f)
+    };
+  }
+}
+
+function getNodeColor(stability: number) {
+  return getNodeStyle(stability).face;
 }
 
 function escapeHtml(unsafe: string) {
@@ -198,9 +216,9 @@ function generateSvgPlot(
       <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8" />
     </marker>
     <linearGradient id="colorbar-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="rgb(215,48,39)" />
-      <stop offset="50%" stop-color="rgb(254,224,139)" />
-      <stop offset="100%" stop-color="rgb(26,152,80)" />
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="50%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#059669" />
     </linearGradient>
   </defs>`);
 
@@ -289,18 +307,13 @@ function generateSvgPlot(
     const sy = y * scale;
 
     const stability = history[abbr]?.[t] ?? 1.0;
-    const node_color = getNodeColor(stability);
-    
-    // High-contrast text color:
-    // Pure crisp white (#ffffff) on dark green (stability >= 0.65) and deep red (stability <= 0.35).
-    // Deep slate black (#0f172a) on light yellow/amber (0.35 < stability < 0.65).
-    const text_color = (stability > 0.35 && stability < 0.65) ? "#0f172a" : "#ffffff";
+    const style = getNodeStyle(stability);
 
     const isTwoLines = abbr.length > 4;
     const radius = isTwoLines ? 0.68 * scale : (abbr.length > 2 ? 0.58 * scale : 0.54 * scale);
 
-    // Node circle with dark border for crisp definition
-    svg_elements.push(`  <circle cx="${sx.toFixed(2)}" cy="${sy.toFixed(2)}" r="${radius.toFixed(2)}" fill="${node_color}" stroke="#0f172a" stroke-width="0.8" />`);
+    // Option 1: Executive Dual-Tone node face with solid colored status border
+    svg_elements.push(`  <circle cx="${sx.toFixed(2)}" cy="${sy.toFixed(2)}" r="${radius.toFixed(2)}" fill="${style.face}" stroke="${style.border}" stroke-width="1.3" />`);
 
     if (isTwoLines) {
       // Split into 2 lines so font can be significantly larger and comfortably readable
@@ -325,21 +338,21 @@ function generateSvgPlot(
       const font_size = 5.2;
       const line_offset = 2.9;
 
-      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy - line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line1Text)}</text>`);
-      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy + line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line2Text)}</text>`);
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy - line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${style.text}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line1Text)}</text>`);
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy + line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${style.text}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line2Text)}</text>`);
     } else {
       // Single line for short abbreviations (1-4 characters) with generously large, clear font
       const font_size = abbr.length <= 2 ? 6.8 : 5.8;
-      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(abbr)}</text>`);
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${style.text}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(abbr)}</text>`);
     }
   }
 
   // Draw the Colorbar first, positioned cleanly below the network (translated down by 50px)
   svg_elements.push(`  <g id="colorbar-container" transform="translate(0, 50)">
     <rect x="-70" y="200" width="140" height="7" fill="url(#colorbar-grad)" rx="1.5" />
-    <text x="-70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">0.0 (Worst)</text>
+    <text x="-70" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#e11d48" text-anchor="middle">0.0 (Worst)</text>
     <text x="0" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#334155" text-anchor="middle">Indicator Stability (Sv)</text>
-    <text x="70" y="217" font-size="7.5" font-family="sans-serif" fill="#64748b" text-anchor="middle">1.0 (Best)</text>
+    <text x="70" y="217" font-size="7.5" font-family="sans-serif" font-weight="bold" fill="#059669" text-anchor="middle">1.0 (Best)</text>
   </g>`);
 
   // Draw Inline Domains & Indicators Legend Box inside the bottom of the image (no background color, below the color palette)
