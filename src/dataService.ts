@@ -1784,7 +1784,7 @@ class DataService {
       const keys = this.getLocalStorageKeys();
 
       // Crucial: preserve the time at which the backup was made; NEVER overwrite with current load/restore time
-      const rawSavedAt =
+      let preservedSavedAt =
         config.savedAt ||
         (config as any).createdAt ||
         (config as any).timestamp ||
@@ -1792,12 +1792,40 @@ class DataService {
         (config as any).created_at ||
         (config as any).date;
 
-      const preservedSavedAt =
-        typeof rawSavedAt === "string" && rawSavedAt.trim()
-          ? rawSavedAt.trim()
-          : typeof rawSavedAt === "number"
-          ? new Date(rawSavedAt).toLocaleString()
-          : new Date().toLocaleString();
+      if (typeof preservedSavedAt === "number") {
+        preservedSavedAt = new Date(preservedSavedAt).toLocaleString();
+      } else if (typeof preservedSavedAt === "string") {
+        preservedSavedAt = preservedSavedAt.trim();
+      }
+
+      // If no savedAt on loaded config, keep the existing backup timestamp from Firestore or localStorage
+      if (!preservedSavedAt) {
+        try {
+          if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
+            const existingSnap = await getDoc(doc(db, "users", userName, "saved_config", "latest"));
+            if (existingSnap.exists() && existingSnap.data()?.savedAt) {
+              preservedSavedAt = existingSnap.data().savedAt;
+            }
+          }
+        } catch {}
+      }
+
+      if (!preservedSavedAt) {
+        try {
+          const existingLocal = localStorage.getItem(keys.savedConfig);
+          if (existingLocal) {
+            const parsedLocal = JSON.parse(existingLocal);
+            if (parsedLocal?.savedAt) {
+              preservedSavedAt = parsedLocal.savedAt;
+            }
+          }
+        } catch {}
+      }
+
+      // Fallback if no prior backup timestamp exists anywhere: preserve label, NEVER current load time
+      if (!preservedSavedAt) {
+        preservedSavedAt = "Original Backup";
+      }
 
       const configToSave: SavedNetworkConfig = {
         name: config.name || "Restored Network",

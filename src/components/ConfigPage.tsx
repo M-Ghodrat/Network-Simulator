@@ -579,6 +579,11 @@ export default function ConfigPage() {
           setDomains([]);
           setNodes([]);
           setEdges([]);
+          setDomainForm({ id: "", name: "" });
+          setEditingDomainId(null);
+          setNodeForm({ id: "", abbr: "", full_name: "", domain_id: "", theta: 0.2, recovery_rate: 0.05 });
+          setEditingNodeId(null);
+          setEdgeForm({ source: "", target: "" });
           showFeedback("All network domains, nodes, and edges have been removed.", "success");
         } catch (err: any) {
           console.error(err);
@@ -1153,18 +1158,18 @@ export default function ConfigPage() {
                 </h3>
                 <form onSubmit={handleSaveNode} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                    <div className="md:col-span-2 space-y-1">
+                    <div className="md:col-span-3 space-y-1">
                       <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Abbreviation (Abbr)</label>
                       <input
                         type="text"
-                        maxLength={4}
+                        maxLength={8}
                         value={nodeForm.abbr}
                         onChange={(e) => setNodeForm({ ...nodeForm, abbr: e.target.value })}
-                        placeholder="e.g. BI"
+                        placeholder="e.g. A1-AC-01"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs uppercase font-mono focus:ring-1 focus:ring-slate-900 focus:outline-none"
                       />
                     </div>
-                    <div className="md:col-span-5 space-y-1">
+                    <div className="md:col-span-4 space-y-1">
                       <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Full Name</label>
                       <input
                         type="text"

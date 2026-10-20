@@ -237,10 +237,19 @@ function generateSvgPlot(
     const dy = s_vy - s_uy;
     const d = Math.sqrt(dx*dx + dy*dy);
     
+    // Dynamically calculate node radius based on abbreviation length and multi-line rendering
+    const getNodeRadius = (nodeAbbr: string) => {
+      if (nodeAbbr.length > 4) return 0.68 * scale; // ~9.52px for 2-line abbreviations (up to 8 chars)
+      if (nodeAbbr.length > 2) return 0.58 * scale; // ~8.12px for 3-4 chars
+      return 0.54 * scale; // ~7.56px for 1-2 chars
+    };
+
     let s_ux_shrunk, s_uy_shrunk, s_vx_shrunk, s_vy_shrunk;
     if (d > 0.001) {
-      const shrink_start = 7.5;
-      const shrink_end = 9.0;
+      const uRadius = getNodeRadius(u);
+      const vRadius = getNodeRadius(v);
+      const shrink_start = uRadius + 0.8;
+      const shrink_end = vRadius + 2.2;
       s_ux_shrunk = s_ux + (dx / d) * shrink_start;
       s_uy_shrunk = s_uy + (dy / d) * shrink_start;
       s_vx_shrunk = s_vx - (dx / d) * shrink_end;
@@ -275,18 +284,54 @@ function generateSvgPlot(
   for (const node of nodes_data) {
     const abbr = node.abbr;
     if (!pos[abbr]) continue;
-    const safe_abbr = escapeHtml(abbr);
     const [x, y] = pos[abbr];
     const sx = x * scale;
     const sy = y * scale;
 
-    const stability = history[abbr][t];
+    const stability = history[abbr]?.[t] ?? 1.0;
     const node_color = getNodeColor(stability);
-    const radius = 0.52 * scale;
+    
+    // High-contrast text color:
+    // Pure crisp white (#ffffff) on dark green (stability >= 0.65) and deep red (stability <= 0.35).
+    // Deep slate black (#0f172a) on light yellow/amber (0.35 < stability < 0.65).
+    const text_color = (stability > 0.35 && stability < 0.65) ? "#0f172a" : "#ffffff";
 
-    svg_elements.push(`  <circle cx="${sx.toFixed(2)}" cy="${sy.toFixed(2)}" r="${radius.toFixed(2)}" fill="${node_color}" stroke="none" />`);
-    const font_size = abbr.length <= 2 ? 7 : 6;
-    svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy + 2.5).toFixed(2)}" font-size="${font_size}" font-family="sans-serif" font-weight="900" fill="#0f172a" text-anchor="middle">${safe_abbr}</text>`);
+    const isTwoLines = abbr.length > 4;
+    const radius = isTwoLines ? 0.68 * scale : (abbr.length > 2 ? 0.58 * scale : 0.54 * scale);
+
+    // Node circle with dark border for crisp definition
+    svg_elements.push(`  <circle cx="${sx.toFixed(2)}" cy="${sy.toFixed(2)}" r="${radius.toFixed(2)}" fill="${node_color}" stroke="#0f172a" stroke-width="0.8" />`);
+
+    if (isTwoLines) {
+      // Split into 2 lines so font can be significantly larger and comfortably readable
+      // Line 1: first 4 characters (or split at hyphen/underscore if present near the middle)
+      // Line 2: remaining characters
+      let line1Text = "";
+      let line2Text = "";
+
+      const hyphenIdx = abbr.indexOf("-");
+      const underIdx = abbr.indexOf("_");
+      const sepIdx = hyphenIdx >= 2 && hyphenIdx <= 4 ? hyphenIdx : (underIdx >= 2 && underIdx <= 4 ? underIdx : -1);
+
+      if (sepIdx !== -1 && (abbr.length - (sepIdx + 1)) <= 4) {
+        line1Text = abbr.slice(0, sepIdx + 1);
+        line2Text = abbr.slice(sepIdx + 1);
+      } else {
+        const splitPos = abbr.length <= 6 ? Math.ceil(abbr.length / 2) : 4;
+        line1Text = abbr.slice(0, splitPos);
+        line2Text = abbr.slice(splitPos);
+      }
+
+      const font_size = 5.2;
+      const line_offset = 2.9;
+
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy - line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line1Text)}</text>`);
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${(sy + line_offset).toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(line2Text)}</text>`);
+    } else {
+      // Single line for short abbreviations (1-4 characters) with generously large, clear font
+      const font_size = abbr.length <= 2 ? 6.8 : 5.8;
+      svg_elements.push(`  <text x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" font-size="${font_size}" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="normal" fill="${text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">${escapeHtml(abbr)}</text>`);
+    }
   }
 
   // Draw the Colorbar first, positioned cleanly below the network (translated down by 50px)

@@ -228,13 +228,32 @@ def generate_svg_plot(nodes_data, edges_data, dimensions_data, history, t, pos, 
         
         stability = history[abbr][t]
         node_color = get_node_color(stability)
+        text_color = "#0f172a" if (stability > 0.35 and stability < 0.65) else "#ffffff"
         
-        radius = 0.52 * scale
-        # Glowing shadow or outer ring (gray circle edge)
-        svg_elements.append(f'  <circle cx="{sx:.2f}" cy="{sy:.2f}" r="{radius:.2f}" fill="{node_color}" stroke="none" />')
+        is_two_lines = len(abbr) > 4
+        radius = 0.68 * scale if is_two_lines else (0.58 * scale if len(abbr) > 2 else 0.54 * scale)
+        svg_elements.append(f'  <circle cx="{sx:.2f}" cy="{sy:.2f}" r="{radius:.2f}" fill="{node_color}" stroke="#0f172a" stroke-width="0.8" />')
         
-        font_size = 7 if len(abbr) <= 2 else 6
-        svg_elements.append(f'  <text x="{sx:.2f}" y="{sy + 2.5:.2f}" font-size="{font_size}" font-family="sans-serif" font-weight="900" fill="#0f172a" text-anchor="middle">{safe_abbr}</text>')
+        if is_two_lines:
+            hyphen_idx = abbr.find("-")
+            under_idx = abbr.find("_")
+            sep_idx = hyphen_idx if (2 <= hyphen_idx <= 4) else (under_idx if (2 <= under_idx <= 4) else -1)
+            
+            if sep_idx != -1 and (len(abbr) - (sep_idx + 1)) <= 4:
+                line1_text = abbr[:sep_idx + 1]
+                line2_text = abbr[sep_idx + 1:]
+            else:
+                split_pos = math.ceil(len(abbr) / 2) if len(abbr) <= 6 else 4
+                line1_text = abbr[:split_pos]
+                line2_text = abbr[split_pos:]
+                
+            font_size = 5.2
+            line_offset = 2.9
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy - line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line1_text)}</text>')
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy + line_offset:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{html.escape(line2_text)}</text>')
+        else:
+            font_size = 6.8 if len(abbr) <= 2 else 5.8
+            svg_elements.append(f'  <text x="{sx:.2f}" y="{sy:.2f}" font-size="{font_size}" font-family="system-ui, -apple-system, sans-serif" font-weight="normal" fill="{text_color}" text-anchor="middle" dominant-baseline="central" style="font-weight: normal;">{safe_abbr}</text>')
 
     # Colorbar at the bottom
     svg_elements.append('''  <g>
@@ -668,10 +687,29 @@ def run_simulation():
                 stability = history[abbr][t]
                 node_color = cmap(stability)
 
-                circle = plt.Circle((x, y), radius=0.48, facecolor=node_color, edgecolor='none', zorder=3)
-                ax.add_patch(circle)
+                # High-contrast text color and un-bold normal font weight
+                txt_color = '#0f172a' if (0.35 < stability < 0.65) else '#ffffff'
+                
+                is_two = len(abbr) > 4
+                if is_two:
+                    hyphen_idx = abbr.find("-")
+                    under_idx = abbr.find("_")
+                    sep_idx = hyphen_idx if (2 <= hyphen_idx <= 4) else (under_idx if (2 <= under_idx <= 4) else -1)
+                    if sep_idx != -1 and (len(abbr) - (sep_idx + 1)) <= 4:
+                        display_text = f"{abbr[:sep_idx + 1]}\n{abbr[sep_idx + 1:]}"
+                    else:
+                        split_pos = math.ceil(len(abbr) / 2) if len(abbr) <= 6 else 4
+                        display_text = f"{abbr[:split_pos]}\n{abbr[split_pos:]}"
+                    r = 0.58
+                    fsize = 6.2
+                else:
+                    display_text = abbr
+                    r = 0.50 if len(abbr) > 2 else 0.46
+                    fsize = 7.5 if len(abbr) <= 2 else 6.8
 
-                ax.text(x, y, abbr, color='#0f172a', fontsize=7.5, fontweight='black', ha='center', va='center', zorder=4)
+                circle = plt.Circle((x, y), radius=r, facecolor=node_color, edgecolor='#0f172a', linewidth=0.8, zorder=3)
+                ax.add_patch(circle)
+                ax.text(x, y, display_text, color=txt_color, fontsize=fsize, fontweight='normal', ha='center', va='center', linespacing=0.9, zorder=4)
 
             sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
             sm.set_array([])
