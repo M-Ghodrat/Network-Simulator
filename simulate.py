@@ -460,8 +460,9 @@ def run_simulation():
         print(json.dumps({"error": f"Invalid JSON: {str(e)}"}))
         return
 
-    nodes_data = data.get("nodes", [])
-    edges_data = data.get("edges", [])
+    nodes_data = [n for n in data.get("nodes", []) if n.get("enabled") is not False]
+    active_abbrs = {n.get("abbr") for n in nodes_data}
+    edges_data = [e for e in data.get("edges", []) if e.get("source") in active_abbrs and e.get("target") in active_abbrs]
     dimensions_data = data.get("dimensions", [])
     params = data.get("params", {})
 

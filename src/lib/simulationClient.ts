@@ -13,6 +13,7 @@ export interface NodeData {
   domain_id: string | number;
   theta?: number;
   recovery_rate?: number;
+  enabled?: boolean;
   [key: string]: any;
 }
 
@@ -390,7 +391,12 @@ function generateSvgPlot(
 }
 
 export function runSimulationClient(payload: SimulationPayload): SimulationResult {
-  const { nodes, edges, domains, params } = payload;
+  const { nodes: rawNodes, edges: rawEdges, domains, params } = payload;
+  
+  // Filter out any nodes that are turned off (enabled === false) so they and their edges don't exist in the graph
+  const nodes = rawNodes.filter(n => n.enabled !== false);
+  const nodes_list = nodes.map(n => n.abbr);
+  const edges = rawEdges.filter(e => nodes_list.includes(e.source) && nodes_list.includes(e.target));
   
   const shocks_raw = params.shocks || {};
   const T = params.T || 8;
@@ -400,7 +406,6 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
   const default_recovery_rate = params.default_recovery_rate || 0.05;
   const interventions_raw = params.interventions || [];
 
-  const nodes_list = nodes.map(n => n.abbr);
   const edges_list: [string, string][] = edges
     .filter(e => nodes_list.includes(e.source) && nodes_list.includes(e.target))
     .map(e => [e.source, e.target]);
@@ -614,10 +619,15 @@ export function runSimulationClient(payload: SimulationPayload): SimulationResul
 }
 
 export function generateStaticNetworkSvg(
-  nodes: NodeData[],
-  edges: EdgeData[],
+  rawNodes: NodeData[],
+  rawEdges: EdgeData[],
   domains: DomainData[]
 ): string {
+  // Exclude turned off nodes and their edges
+  const nodes = rawNodes.filter(n => n.enabled !== false);
+  const activeAbbrs = new Set(nodes.map(n => n.abbr));
+  const edges = rawEdges.filter(e => activeAbbrs.has(e.source) && activeAbbrs.has(e.target));
+
   const domains_list = Array.from(new Set(nodes.map(n => String(n.domain_id)))).sort();
   const num_domains = domains_list.length;
   const centers: Record<string, [number, number]> = {};

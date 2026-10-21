@@ -169,7 +169,9 @@ export function parseDefaultEdges(): Edge[] {
         edges.push({
           id: `${sourceAbbr}_to_${targetAbbr}`,
           source: sourceAbbr,
-          target: targetAbbr
+          target: targetAbbr,
+          weight: 1.0,
+          weight_label: "Unweighted"
         });
       }
     }
@@ -211,21 +213,21 @@ export const SIMPLE_NODES: NodeIndicator[] = [
 
 export function parseSimpleEdges(): Edge[] {
   return [
-    { id: "e1", source: "BI", target: "DI", weight: 1.0 },
-    { id: "e2", source: "DI", target: "EN", weight: 1.0 },
-    { id: "e3", source: "EN", target: "WR", weight: 1.0 },
-    { id: "e4", source: "WR", target: "BE", weight: 1.0 },
-    { id: "e5", source: "BE", target: "PF", weight: 1.0 },
-    { id: "e6", source: "PF", target: "IN", weight: 1.0 },
-    { id: "e7", source: "IN", target: "ER", weight: 1.0 },
-    { id: "e8", source: "ER", target: "AQ", weight: 1.0 },
-    { id: "e9", source: "AQ", target: "DC", weight: 1.0 },
-    { id: "e10", source: "DC", target: "FL", weight: 1.0 },
-    { id: "e11", source: "FL", target: "GI", weight: 1.0 },
-    { id: "e12", source: "GI", target: "PH", weight: 1.0 },
-    { id: "e13", source: "PH", target: "ED", weight: 1.0 },
-    { id: "e14", source: "ED", target: "DM", weight: 1.0 },
-    { id: "e15", source: "DM", target: "SC", weight: 1.0 },
-    { id: "e16", source: "SC", target: "BI", weight: 1.0 }
+    { id: "e1", source: "BI", target: "DI", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e2", source: "DI", target: "EN", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e3", source: "EN", target: "WR", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e4", source: "WR", target: "BE", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e5", source: "BE", target: "PF", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e6", source: "PF", target: "IN", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e7", source: "IN", target: "ER", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e8", source: "ER", target: "AQ", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e9", source: "AQ", target: "DC", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e10", source: "DC", target: "FL", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e11", source: "FL", target: "GI", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e12", source: "GI", target: "PH", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e13", source: "PH", target: "ED", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e14", source: "ED", target: "DM", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e15", source: "DM", target: "SC", weight: 1.0, weight_label: "Unweighted" },
+    { id: "e16", source: "SC", target: "BI", weight: 1.0, weight_label: "Unweighted" }
   ];
 }

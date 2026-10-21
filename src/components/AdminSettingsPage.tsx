@@ -8,7 +8,9 @@ import {
   AcademicSeason, 
   DEFAULT_USER_ACCOUNTS,
   LearnVisibilityConfig,
-  DEFAULT_LEARN_VISIBILITY
+  DEFAULT_LEARN_VISIBILITY,
+  EdgeWeightMapping,
+  DEFAULT_EDGE_WEIGHT_MAPPING
 } from "../types";
 import {
   SlidersHorizontal,
@@ -46,7 +48,7 @@ import {
 import ConfirmModal from "./ConfirmModal";
 
 export default function AdminSettingsPage() {
-  const [adminTab, setAdminTab] = useState<"users" | "limits" | "learn">("users");
+  const [adminTab, setAdminTab] = useState<"users" | "limits" | "edge_weights" | "learn">("users");
 
   // Limits State
   const [limits, setLimits] = useState<SimulationLimitsConfig>({ ...DEFAULT_SIMULATION_LIMITS });
@@ -54,6 +56,13 @@ export default function AdminSettingsPage() {
   const [loadingLimits, setLoadingLimits] = useState(false);
   const [limitsSaveSuccess, setLimitsSaveSuccess] = useState(false);
   const [showResetLimitsModal, setShowResetLimitsModal] = useState(false);
+
+  // Edge Weight Multipliers State
+  const [edgeWeights, setEdgeWeights] = useState<EdgeWeightMapping>({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
+  const [initialEdgeWeights, setInitialEdgeWeights] = useState<EdgeWeightMapping>({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
+  const [loadingEdgeWeights, setLoadingEdgeWeights] = useState(false);
+  const [edgeWeightsSaveSuccess, setEdgeWeightsSaveSuccess] = useState(false);
+  const [showResetEdgeWeightsModal, setShowResetEdgeWeightsModal] = useState(false);
 
   // Learn Section Visibility State
   const [learnVisibility, setLearnVisibility] = useState<LearnVisibilityConfig>({ ...DEFAULT_LEARN_VISIBILITY });
@@ -121,10 +130,16 @@ export default function AdminSettingsPage() {
       setInitialLearnVisibility(curVisibility);
     });
 
+    const unsubWeights = dataService.subscribeEdgeWeightMapping((curMapping) => {
+      setEdgeWeights(curMapping);
+      setInitialEdgeWeights(curMapping);
+    });
+
     return () => {
       unsubLimits();
       unsubAccounts();
       unsubLearn();
+      unsubWeights();
     };
   }, []);
 
@@ -364,6 +379,56 @@ export default function AdminSettingsPage() {
     }
   };
 
+  // Edge Weights Handlers
+  const handleWeightChange = (key: keyof EdgeWeightMapping, value: number) => {
+    setEdgeWeights((prev) => ({
+      ...prev,
+      [key]: value
+    }));
+    setEdgeWeightsSaveSuccess(false);
+  };
+
+  const handleSaveEdgeWeights = async () => {
+    for (const [key, rawVal] of Object.entries(edgeWeights)) {
+      const val = Number(rawVal);
+      if (isNaN(val) || val < 0) {
+        alert(`Invalid multiplier for ${key}: Value must be a non-negative number.`);
+        return;
+      }
+    }
+
+    setLoadingEdgeWeights(true);
+    try {
+      await dataService.saveEdgeWeightMapping(edgeWeights);
+      setInitialEdgeWeights({ ...edgeWeights });
+      setEdgeWeightsSaveSuccess(true);
+      setTimeout(() => setEdgeWeightsSaveSuccess(false), 4000);
+    } catch (e) {
+      console.error("Failed to save edge weight multipliers:", e);
+      alert("Failed to save edge weight multipliers.");
+    } finally {
+      setLoadingEdgeWeights(false);
+    }
+  };
+
+  const handleConfirmResetEdgeWeights = async () => {
+    setLoadingEdgeWeights(true);
+    try {
+      await dataService.resetEdgeWeightMapping();
+      setEdgeWeights({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
+      setInitialEdgeWeights({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
+      setShowResetEdgeWeightsModal(false);
+      setEdgeWeightsSaveSuccess(true);
+      setTimeout(() => setEdgeWeightsSaveSuccess(false), 4000);
+    } catch (e) {
+      console.error("Failed to reset edge weight multipliers:", e);
+    } finally {
+      setLoadingEdgeWeights(false);
+    }
+  };
+
+  const isEdgeWeightsDirty = JSON.stringify(edgeWeights) !== JSON.stringify(initialEdgeWeights);
+
   const isLearnVisibilityDirty = JSON.stringify(learnVisibility) !== JSON.stringify(initialLearnVisibility);
   const visibleLearnCount = Object.values(learnVisibility).filter(Boolean).length;
 
@@ -558,6 +623,22 @@ export default function AdminSettingsPage() {
         >
           <SlidersHorizontal size={15} className={adminTab === "limits" ? "text-[#5C9EE8]" : "text-[#A6A7AB]"} />
           <span>Simulation Parameter Limits</span>
+        </button>
+
+        <button
+          onClick={() => setAdminTab("edge_weights")}
+          className={`flex-1 px-4 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+            adminTab === "edge_weights"
+              ? "bg-[#42454E] text-[#F1F3F5] shadow-sm border border-[#565A66]"
+              : "text-[#A6A7AB] hover:text-[#F1F3F5] hover:bg-[#42454E]/50"
+          }`}
+          id="admin-tab-edge-weights"
+        >
+          <Network size={15} className={adminTab === "edge_weights" ? "text-[#5C9EE8]" : "text-[#A6A7AB]"} />
+          <span>Edge Weight Multipliers</span>
+          <span className="ml-1 px-1.5 py-0.2 bg-[#5C9EE8]/20 text-[#5C9EE8] text-[10px] font-mono rounded-full font-bold border border-[#5C9EE8]/30">
+            4 Tiers
+          </span>
         </button>
 
         <button
@@ -1070,6 +1151,287 @@ export default function AdminSettingsPage() {
         </div>
       )}
 
+      {/* ==================== TAB: EDGE WEIGHT MULTIPLIERS ==================== */}
+      {adminTab === "edge_weights" && (
+        <div className="space-y-8 animate-in fade-in duration-300" id="edge-weights-section">
+          {/* Top Control Bar */}
+          <div className="bg-[#2E3036] rounded-2xl border border-[#42454E] p-6 shadow-xs space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#42454E] pb-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#383A42] text-[#5C9EE8] rounded-xl border border-[#42454E]">
+                  <Network size={22} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[#F1F3F5]">
+                      Edge Weight Multipliers
+                    </h3>
+                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 bg-[#5C9EE8]/20 text-[#5C9EE8] rounded-md font-bold border border-[#5C9EE8]/30">
+                      Simulator Calibration
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#A6A7AB] mt-0.5">
+                    Configure the numerical weight mapped to each qualitative edge weight tier. These multipliers scale vulnerability transmission across directed causal pathways during simulation waves.
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-3 self-end md:self-auto">
+                <button
+                  onClick={() => setShowResetEdgeWeightsModal(true)}
+                  disabled={loadingEdgeWeights}
+                  className="px-3.5 py-2 text-xs font-semibold text-[#A6A7AB] hover:text-[#F1F3F5] bg-[#383A42] hover:bg-[#42454E] border border-[#565A66] rounded-xl transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Reset all edge weight multipliers to system specifications"
+                >
+                  <RotateCcw size={14} />
+                  <span>Reset Defaults</span>
+                </button>
+
+                <button
+                  onClick={handleSaveEdgeWeights}
+                  disabled={loadingEdgeWeights || !isEdgeWeightsDirty}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer ${
+                    isEdgeWeightsDirty
+                      ? "bg-[#5C9EE8] hover:bg-[#4a8cd4] text-[#1E1F23]"
+                      : "bg-[#383A42] text-[#565A66] cursor-not-allowed border border-[#42454E]"
+                  }`}
+                >
+                  {loadingEdgeWeights ? (
+                    <div className="w-3.5 h-3.5 border-2 border-[#1E1F23] border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Save size={14} />
+                  )}
+                  <span>{loadingEdgeWeights ? "Saving..." : isEdgeWeightsDirty ? "Save Multipliers" : "Saved"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Success notification banner */}
+            {edgeWeightsSaveSuccess && (
+              <div className="p-3 bg-[#238636]/15 border border-[#238636]/40 rounded-xl flex items-center gap-2.5 text-xs text-[#3fb950] animate-in fade-in duration-200">
+                <CheckCircle2 size={16} className="shrink-0" />
+                <span>
+                  Edge weight multipliers saved successfully. All directed network edges and simulation calculations are synchronized with these values.
+                </span>
+              </div>
+            )}
+
+            {/* 4 Multiplier Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 1. Unweighted */}
+              <div className="bg-[#1E1F23] border border-[#42454E] rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-[#E2E8F0] text-[#1E293B] border border-[#CBD5E1]">
+                    Unweighted
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-300 font-bold bg-[#2E3036] px-1.5 py-0.5 rounded border border-[#565A66]">
+                    Default Baseline
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-[#A6A7AB] block">
+                    Numeric Multiplier
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="10"
+                    value={edgeWeights.unweighted}
+                    onChange={(e) => handleWeightChange("unweighted", parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 text-sm font-mono font-bold bg-[#2E3036] border border-[#565A66] rounded-lg text-[#F1F3F5] focus:outline-hidden focus:ring-1 focus:ring-[#5C9EE8]"
+                  />
+                </div>
+                <p className="text-[11px] text-[#A6A7AB] leading-relaxed">
+                  Baseline multiplier for standard, unscaled directed connections. Default assigned to past submissions and new edges.
+                </p>
+                <div className="text-[10px] font-mono text-slate-400 pt-1 border-t border-[#383A42] flex justify-between">
+                  <span>Relative Factor:</span>
+                  <span className="font-bold text-slate-200">{Number(edgeWeights.unweighted).toFixed(2)}× (100% baseline)</span>
+                </div>
+              </div>
+
+              {/* 2. High (Green) */}
+              <div className="bg-[#1E1F23] border border-[#42454E] rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-[#064E3B] text-[#34D399] border border-[#059669]">
+                    High
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
+                    High Weight
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-[#A6A7AB] block">
+                    Numeric Multiplier
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="10"
+                    value={edgeWeights.High}
+                    onChange={(e) => handleWeightChange("High", parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 text-sm font-mono font-bold bg-[#2E3036] border border-[#565A66] rounded-lg text-[#F1F3F5] focus:outline-hidden focus:ring-1 focus:ring-[#5C9EE8]"
+                  />
+                </div>
+                <p className="text-[11px] text-[#A6A7AB] leading-relaxed">
+                  Strong causal dependency. High probability and rapid velocity of vulnerability transmission across indicators.
+                </p>
+                <div className="text-[10px] font-mono text-emerald-400 pt-1 border-t border-[#383A42] flex justify-between">
+                  <span>Transmission Factor:</span>
+                  <span className="font-bold">{Number(edgeWeights.High).toFixed(2)}× ({Math.round(edgeWeights.High * 100)}%)</span>
+                </div>
+              </div>
+
+              {/* 3. Medium (Yellow) */}
+              <div className="bg-[#1E1F23] border border-[#42454E] rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-[#422006] text-[#FDE047] border border-[#CA8A04]">
+                    Medium
+                  </span>
+                  <span className="text-[10px] font-mono text-yellow-300 font-bold bg-yellow-950/60 px-1.5 py-0.5 rounded border border-yellow-800/40">
+                    Medium Weight
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-[#A6A7AB] block">
+                    Numeric Multiplier
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="10"
+                    value={edgeWeights.Medium}
+                    onChange={(e) => handleWeightChange("Medium", parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 text-sm font-mono font-bold bg-[#2E3036] border border-[#565A66] rounded-lg text-[#F1F3F5] focus:outline-hidden focus:ring-1 focus:ring-[#5C9EE8]"
+                  />
+                </div>
+                <p className="text-[11px] text-[#A6A7AB] leading-relaxed">
+                  Intermediate edge weight. Balanced shock propagation between interconnected resilience domains.
+                </p>
+                <div className="text-[10px] font-mono text-yellow-300 pt-1 border-t border-[#383A42] flex justify-between">
+                  <span>Transmission Factor:</span>
+                  <span className="font-bold">{Number(edgeWeights.Medium).toFixed(2)}× ({Math.round(edgeWeights.Medium * 100)}%)</span>
+                </div>
+              </div>
+
+              {/* 4. Low (Red) */}
+              <div className="bg-[#1E1F23] border border-[#42454E] rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-[#4C0519] text-[#FDA4AF] border border-[#E11D48]">
+                    Low
+                  </span>
+                  <span className="text-[10px] font-mono text-rose-400 font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/40">
+                    Low Weight
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-[#A6A7AB] block">
+                    Numeric Multiplier
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="10"
+                    value={edgeWeights.Low}
+                    onChange={(e) => handleWeightChange("Low", parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 text-sm font-mono font-bold bg-[#2E3036] border border-[#565A66] rounded-lg text-[#F1F3F5] focus:outline-hidden focus:ring-1 focus:ring-[#5C9EE8]"
+                  />
+                </div>
+                <p className="text-[11px] text-[#A6A7AB] leading-relaxed">
+                  Weak causal link. Significant dampening of shock spillover with minor downstream vulnerability effect.
+                </p>
+                <div className="text-[10px] font-mono text-rose-400 pt-1 border-t border-[#383A42] flex justify-between">
+                  <span>Transmission Factor:</span>
+                  <span className="font-bold">{Number(edgeWeights.Low).toFixed(2)}× ({Math.round(edgeWeights.Low * 100)}%)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Reference Table */}
+          <div className="bg-[#2E3036] rounded-2xl border border-[#42454E] p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-[#42454E] pb-4">
+              <div>
+                <h4 className="text-sm font-bold text-[#F1F3F5]">
+                  Student UI & Simulator Mapping Matrix
+                </h4>
+                <p className="text-xs text-[#A6A7AB]">
+                  Live preview of how each edge weight level appears in the student Adjacency Edges List and maps into calculation values.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-[#5C9EE8] bg-[#5C9EE8]/10 px-2.5 py-1 rounded-lg border border-[#5C9EE8]/30">
+                System Active
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-[#42454E]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-[#1E1F23] text-[#A6A7AB] border-b border-[#42454E] font-mono text-[10px] uppercase">
+                    <th className="p-3 font-semibold">Tier Label</th>
+                    <th className="p-3 font-semibold">Configured Multiplier</th>
+                    <th className="p-3 font-semibold">Student Dropdown Option</th>
+                    <th className="p-3 font-semibold">Adjacency Table Display</th>
+                    <th className="p-3 font-semibold">Weight Impact</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#42454E] text-[#D0D3D7]">
+                  <tr className="hover:bg-[#383A42]/40 transition-colors">
+                    <td className="p-3 font-mono font-bold text-[#F1F3F5]">Unweighted</td>
+                    <td className="p-3 font-mono font-bold text-slate-300">{Number(edgeWeights.unweighted).toFixed(2)}</td>
+                    <td className="p-3 font-mono text-xs">Unweighted ({Number(edgeWeights.unweighted).toFixed(2)})</td>
+                    <td className="p-3">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#E2E8F0] text-[#1E293B] border border-[#CBD5E1]">
+                        Unweighted
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-[#A6A7AB]">Baseline Transmission (100%)</td>
+                  </tr>
+                  <tr className="hover:bg-[#383A42]/40 transition-colors">
+                    <td className="p-3 font-mono font-bold text-[#F1F3F5]">High</td>
+                    <td className="p-3 font-mono font-bold text-emerald-400">{Number(edgeWeights.High).toFixed(2)}</td>
+                    <td className="p-3 font-mono text-xs">High ({Number(edgeWeights.High).toFixed(2)})</td>
+                    <td className="p-3">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#064E3B] text-[#34D399] border border-[#059669]">
+                        High
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-[#A6A7AB]">Strong Causal Propagation</td>
+                  </tr>
+                  <tr className="hover:bg-[#383A42]/40 transition-colors">
+                    <td className="p-3 font-mono font-bold text-[#F1F3F5]">Medium</td>
+                    <td className="p-3 font-mono font-bold text-amber-400">{Number(edgeWeights.Medium).toFixed(2)}</td>
+                    <td className="p-3 font-mono text-xs">Medium ({Number(edgeWeights.Medium).toFixed(2)})</td>
+                    <td className="p-3">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#422006] text-[#FDE047] border border-[#CA8A04]">
+                        Medium
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-[#A6A7AB]">Balanced Cross-Domain Impact</td>
+                  </tr>
+                  <tr className="hover:bg-[#383A42]/40 transition-colors">
+                    <td className="p-3 font-mono font-bold text-[#F1F3F5]">Low</td>
+                    <td className="p-3 font-mono font-bold text-rose-400">{Number(edgeWeights.Low).toFixed(2)}</td>
+                    <td className="p-3 font-mono text-xs">Low ({Number(edgeWeights.Low).toFixed(2)})</td>
+                    <td className="p-3">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#4C0519] text-[#FDA4AF] border border-[#E11D48]">
+                        Low
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-[#A6A7AB]">Dampened Spillover Influence</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== TAB 3: LEARN SECTION VISIBILITY ==================== */}
       {adminTab === "learn" && (
         <div className="space-y-8 animate-in fade-in duration-300" id="learn-visibility-section">
@@ -1336,6 +1698,18 @@ export default function AdminSettingsPage() {
         type="danger"
         onConfirm={handleConfirmResetLearnVisibility}
         onCancel={() => setShowResetLearnModal(false)}
+      />
+
+      {/* Reset Edge Weights Modal */}
+      <ConfirmModal
+        isOpen={showResetEdgeWeightsModal}
+        title="Reset Edge Weight Multipliers?"
+        message="This will restore all edge weight multipliers to standard specifications: Unweighted = 1.0, High = 0.9, Medium = 0.65, and Low = 0.3."
+        confirmText="Reset to Defaults"
+        cancelText="Cancel"
+        type="danger"
+        onConfirm={handleConfirmResetEdgeWeights}
+        onCancel={() => setShowResetEdgeWeightsModal(false)}
       />
     </div>
   );

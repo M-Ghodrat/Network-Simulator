@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Domain, NodeIndicator, Edge, SavedNetworkConfig, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
+import { 
+  Domain, 
+  NodeIndicator, 
+  Edge, 
+  SavedNetworkConfig, 
+  SimulationLimitsConfig, 
+  DEFAULT_SIMULATION_LIMITS,
+  EdgeWeightLabel,
+  EdgeWeightMapping,
+  DEFAULT_EDGE_WEIGHT_MAPPING
+} from "../types";
 import { dataService } from "../dataService";
 import { Trash2, Edit3, Plus, RefreshCw, Search, ArrowRight, AlertTriangle, CheckCircle, Info, Database, Network, Save, FolderOpen, TrendingUp, Award, Download, FileSpreadsheet, Image as ImageIcon, User } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
@@ -87,12 +97,15 @@ export default function ConfigPage() {
   };
 
   // Tabs for sub-sections
-  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges" | "network" | "metrics">("nodes");
+  const [activeTab, setActiveTab] = useState<"domains" | "nodes" | "edges" | "network" | "metrics">("domains");
   const [metricDomainFilter, setMetricDomainFilter] = useState("all");
   const [metricNodeSearch, setMetricNodeSearch] = useState("");
   const [sortBy, setSortBy] = useState<"id" | "inDegree" | "outDegree" | "betweenness">("id");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [networkScale, setNetworkScale] = useState(100);
+
+  // Edge Weight Multipliers Mapping
+  const [edgeWeightMapping, setEdgeWeightMapping] = useState<EdgeWeightMapping>({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
 
   // Active user identification
   const currentUserName = dataService.getCurrentUserName();
@@ -161,7 +174,15 @@ export default function ConfigPage() {
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
   // CRUD Form States - Edges
-  const [edgeForm, setEdgeForm] = useState({ source: "", target: "" });
+  const [edgeForm, setEdgeForm] = useState<{
+    source: string;
+    target: string;
+    weight_label: EdgeWeightLabel;
+  }>({
+    source: "",
+    target: "",
+    weight_label: "Unweighted"
+  });
 
   // Filters / Search
   const [nodeSearch, setNodeSearch] = useState("");
@@ -192,40 +213,50 @@ export default function ConfigPage() {
       setIsLocal(localFlag);
     });
 
+    const unsubMapping = dataService.subscribeEdgeWeightMapping((m) => {
+      setEdgeWeightMapping(m);
+    });
+
     return () => {
       unsubDomains();
       unsubNodes();
       unsubEdges();
       unsubLimits();
       unsubStatus();
+      unsubMapping();
     };
   }, []);
 
-  // Centrality metrics calculations
+  // Derived active nodes & edges (turned-off nodes & their in/out edges are excluded from graph)
+  const activeNodes = useMemo(() => nodes.filter(n => n.enabled !== false), [nodes]);
+  const activeNodeAbbrs = useMemo(() => new Set(activeNodes.map(n => n.abbr)), [activeNodes]);
+  const activeEdges = useMemo(() => edges.filter(e => activeNodeAbbrs.has(e.source) && activeNodeAbbrs.has(e.target)), [edges, activeNodeAbbrs]);
+
+  // Centrality metrics calculations (only on active graph)
   const allMetrics = useMemo(() => {
     const inDegree: Record<string, number> = {};
     const outDegree: Record<string, number> = {};
     const betweenness: Record<string, number> = {};
 
-    nodes.forEach((n) => {
+    activeNodes.forEach((n) => {
       inDegree[n.id] = 0;
       outDegree[n.id] = 0;
       betweenness[n.id] = 0;
     });
 
-    edges.forEach((e) => {
+    activeEdges.forEach((e) => {
       if (outDegree[e.source] !== undefined) outDegree[e.source]++;
       if (inDegree[e.target] !== undefined) inDegree[e.target]++;
     });
 
-    // Brandes' Algorithm for unweighted directed graph
-    nodes.forEach((s) => {
+    // Brandes' Algorithm for unweighted directed active graph
+    activeNodes.forEach((s) => {
       const S: string[] = []; // Stack
       const P: Record<string, string[]> = {}; // Predecessors list
       const sigma: Record<string, number> = {}; // shortest path counts
       const d: Record<string, number> = {}; // distances
 
-      nodes.forEach((w) => {
+      activeNodes.forEach((w) => {
         P[w.id] = [];
         sigma[w.id] = 0;
         d[w.id] = -1;
@@ -242,8 +273,8 @@ export default function ConfigPage() {
         const v = Q.shift()!;
         S.push(v);
 
-        // Out neighbors of v
-        const neighbors = edges.filter((e) => e.source === v).map((e) => e.target);
+        // Out neighbors of v in active graph
+        const neighbors = activeEdges.filter((e) => e.source === v).map((e) => e.target);
 
         neighbors.forEach((w) => {
           if (d[w] !== undefined) {
@@ -260,7 +291,7 @@ export default function ConfigPage() {
       }
 
       const delta: Record<string, number> = {};
-      nodes.forEach((w) => (delta[w.id] = 0));
+      activeNodes.forEach((w) => (delta[w.id] = 0));
 
       while (S.length > 0) {
         const w = S.pop()!;
@@ -277,10 +308,10 @@ export default function ConfigPage() {
     });
 
     return { inDegree, outDegree, betweenness };
-  }, [nodes, edges]);
+  }, [activeNodes, activeEdges]);
 
   const overallExtremums = useMemo(() => {
-    if (nodes.length === 0) return null;
+    if (activeNodes.length === 0) return null;
 
     const getExtremums = (metric: Record<string, number>) => {
       const entries = Object.entries(metric);
@@ -313,10 +344,10 @@ export default function ConfigPage() {
       outDegree: getExtremums(allMetrics.outDegree),
       betweenness: getExtremums(allMetrics.betweenness),
     };
-  }, [nodes, allMetrics]);
+  }, [activeNodes, allMetrics]);
 
   const filteredMetricsList = useMemo(() => {
-    const list = nodes
+    const list = activeNodes
       .filter((node) => {
         const matchesDomain = metricDomainFilter === "all" || node.domain_id === metricDomainFilter;
         const matchesSearch =
@@ -416,11 +447,13 @@ export default function ConfigPage() {
       showFeedback("No directed edges to export.", "error");
       return;
     }
-    const headers = ["Edge ID", "Source (u)", "Source Name", "Target (v)", "Target Name", "Connection Type", "Weight"];
+    const headers = ["Edge ID", "Source (u)", "Source Name", "Target (v)", "Target Name", "Connection Type", "Weight Label", "Weight Multiplier"];
     const rows = edges.map(e => {
       const sNode = nodes.find(n => n.abbr === e.source);
       const tNode = nodes.find(n => n.abbr === e.target);
       const isIntra = sNode && tNode && sNode.domain_id === tNode.domain_id;
+      const weightLabel = e.weight_label || "Unweighted";
+      const numWeight = e.weight !== undefined ? e.weight : dataService.getMappedEdgeWeight(weightLabel);
       return [
         e.id,
         e.source,
@@ -428,7 +461,8 @@ export default function ConfigPage() {
         e.target,
         tNode?.full_name || "Unknown",
         isIntra ? "Intra-Domain" : "Inter-Domain",
-        e.weight ?? 1.0
+        weightLabel,
+        numWeight
       ];
     });
     downloadCSV(`ursa_adjacency_edges_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
@@ -466,12 +500,12 @@ export default function ConfigPage() {
   };
 
   const downloadNetworkMapSvg = () => {
-    if (nodes.length === 0) {
-      showFeedback("Cannot export map: network has no nodes.", "error");
+    if (activeNodes.length === 0) {
+      showFeedback("Cannot export map: network has no active nodes.", "error");
       return;
     }
     try {
-      const svgDataUri = generateStaticNetworkSvg(nodes, edges, domains);
+      const svgDataUri = generateStaticNetworkSvg(activeNodes, activeEdges, domains);
       const base64Index = svgDataUri.indexOf("base64,");
       if (base64Index === -1) {
         showFeedback("Failed to process SVG image.", "error");
@@ -495,12 +529,12 @@ export default function ConfigPage() {
   };
 
   const downloadNetworkMapPng = () => {
-    if (nodes.length === 0) {
-      showFeedback("Cannot export map: network has no nodes.", "error");
+    if (activeNodes.length === 0) {
+      showFeedback("Cannot export map: network has no active nodes.", "error");
       return;
     }
     try {
-      const svgDataUri = generateStaticNetworkSvg(nodes, edges, domains);
+      const svgDataUri = generateStaticNetworkSvg(activeNodes, activeEdges, domains);
       const img = new Image();
       img.onload = () => {
         const baseWidth = img.naturalWidth || 420;
@@ -727,7 +761,8 @@ export default function ConfigPage() {
             id: `${newSource}-${newTarget}`,
             source: newSource,
             target: newTarget,
-            weight: oldEdge.weight
+            weight_label: oldEdge.weight_label || "Unweighted",
+            weight: oldEdge.weight !== undefined ? oldEdge.weight : dataService.getMappedEdgeWeight(oldEdge.weight_label)
           };
           
           await dataService.saveEdge(newEdge);
@@ -806,12 +841,27 @@ export default function ConfigPage() {
     });
   };
 
+  const handleToggleNode = async (abbr: string, newEnabled: boolean) => {
+    try {
+      await dataService.toggleNodeActive(abbr, newEnabled);
+      showFeedback(
+        newEnabled 
+          ? `Indicator node ${abbr} switched ON (active in network graph).`
+          : `Indicator node ${abbr} switched OFF (excluded from network graph and simulation).`,
+        "success"
+      );
+    } catch (err: any) {
+      console.error(err);
+      showFeedback(`Failed to toggle indicator node: ${err?.message || err}`, "error");
+    }
+  };
+
   // ==========================================
   // EDGE CRUD
   // ==========================================
   const handleAddEdge = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { source, target } = edgeForm;
+    const { source, target, weight_label } = edgeForm;
     if (!source || !target) return;
     if (source === target) {
       showFeedback("Source and target indicators cannot be the same!", "error");
@@ -826,12 +876,37 @@ export default function ConfigPage() {
     }
 
     try {
-      const newEdge: Edge = { id: edgeId, source, target };
+      const selectedLabel = weight_label || "Unweighted";
+      const mappedWeight = dataService.getMappedEdgeWeight(selectedLabel);
+      const newEdge: Edge = {
+        id: edgeId,
+        source,
+        target,
+        weight_label: selectedLabel,
+        weight: mappedWeight
+      };
       await dataService.saveEdge(newEdge);
-      setEdgeForm({ source: "", target: "" });
-      showFeedback(`Edge ${source} → ${target} created successfully!`, "success");
+      setEdgeForm({ source: "", target: "", weight_label: "Unweighted" });
+      showFeedback(`Edge ${source} → ${target} (${selectedLabel}: ${mappedWeight}) created successfully!`, "success");
     } catch (err: any) {
       showFeedback(`Failed to create edge: ${err.message}`, "error");
+    }
+  };
+
+  const handleUpdateEdgeWeight = async (edgeId: string, newLabel: EdgeWeightLabel) => {
+    const edge = edges.find(e => e.id === edgeId);
+    if (!edge) return;
+    const mapped = dataService.getMappedEdgeWeight(newLabel);
+    const updatedEdge: Edge = {
+      ...edge,
+      weight_label: newLabel,
+      weight: mapped
+    };
+    try {
+      await dataService.saveEdge(updatedEdge);
+      showFeedback(`Updated ${edge.source} → ${edge.target} weight to ${newLabel} (${mapped})`, "success");
+    } catch (err: any) {
+      showFeedback(`Failed to update edge weight: ${err.message}`, "error");
     }
   };
 
@@ -969,10 +1044,23 @@ export default function ConfigPage() {
         <div className="lg:col-span-3 bg-white p-4 border border-slate-200 rounded-xl space-y-2 h-fit shadow-xs" id="config-sidebar">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 py-1">Sections</h3>
           <button
+            onClick={() => setActiveTab("domains")}
+            className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
+              activeTab === "domains" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
+            }`}
+            id="tab-domains"
+          >
+            <span>Domains</span>
+            <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
+              {domains.length}
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab("nodes")}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
               activeTab === "nodes" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
             }`}
+            id="tab-nodes"
           >
             <span>Nodes (Indicators)</span>
             <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
@@ -984,6 +1072,7 @@ export default function ConfigPage() {
             className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
               activeTab === "edges" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
             }`}
+            id="tab-edges"
           >
             <span>Directed Edges</span>
             <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
@@ -991,21 +1080,11 @@ export default function ConfigPage() {
             </span>
           </button>
           <button
-            onClick={() => setActiveTab("domains")}
-            className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
-              activeTab === "domains" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            <span>Domains</span>
-            <span className="bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded-md font-mono text-[10px]">
-              {domains.length}
-            </span>
-          </button>
-          <button
             onClick={() => setActiveTab("network")}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
               activeTab === "network" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
             }`}
+            id="tab-network"
           >
             <span className="flex items-center gap-1.5">
               <Network size={12} className="text-slate-400" />
@@ -1020,6 +1099,7 @@ export default function ConfigPage() {
             className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
               activeTab === "metrics" ? "bg-slate-100 text-slate-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
             }`}
+            id="tab-metrics"
           >
             <span className="flex items-center gap-1.5">
               <TrendingUp size={12} className="text-slate-400" />
@@ -1051,7 +1131,7 @@ export default function ConfigPage() {
             <div className="space-y-6" id="domains-tab">
               {/* Form to create/edit domain */}
               <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-xs space-y-4">
-                <h3 className="text-sm font-bold text-slate-900 font-sans">
+                <h3 className="text-sm font-bold text-[#F1F3F5] font-sans">
                   {editingDomainId ? "Edit Domain" : "Create New Domain"}
                 </h3>
                 <form onSubmit={handleSaveDomain} className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
@@ -1122,7 +1202,7 @@ export default function ConfigPage() {
                           <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-slate-700 font-mono font-bold rounded-lg border border-slate-200 text-[10px]">
                             {dim.id}
                           </span>
-                          <span className="font-semibold text-slate-900 font-sans">{dim.name}</span>
+                          <span className="font-semibold text-[#F1F3F5] font-sans">{dim.name}</span>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -1130,7 +1210,7 @@ export default function ConfigPage() {
                               setEditingDomainId(dim.id);
                               setDomainForm({ id: dim.id, name: dim.name });
                             }}
-                            className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-md transition-colors"
+                            className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-[#F1F3F5] rounded-md transition-colors"
                           >
                             <Edit3 size={13} />
                           </button>
@@ -1266,7 +1346,9 @@ export default function ConfigPage() {
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
                   <div className="flex items-center gap-3 self-start sm:self-center">
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Indicator Registry</h3>
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">{filteredNodes.length} nodes</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">
+                      {activeNodes.length} active / {nodes.length} total
+                    </span>
                   </div>
                   
                   {/* Filters & Export */}
@@ -1306,6 +1388,7 @@ export default function ConfigPage() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 border-b border-slate-100 font-mono text-[10px] uppercase">
+                        <th className="p-3 font-semibold text-center whitespace-nowrap">Active</th>
                         <th className="p-3 font-semibold">Abbr</th>
                         <th className="p-3 font-semibold">Full Name</th>
                         <th className="p-3 font-semibold">Domain</th>
@@ -1317,26 +1400,81 @@ export default function ConfigPage() {
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {filteredNodes.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-400">No matching indicator nodes found.</td>
+                          <td colSpan={7} className="p-8 text-center text-slate-400">No matching indicator nodes found.</td>
                         </tr>
                       ) : (
                         filteredNodes.map((node) => {
                           const dName = domains.find((d) => d.id === node.domain_id)?.name || `Domain ${node.domain_id}`;
+                          const isActive = node.enabled !== false;
                           return (
-                            <tr key={node.abbr} className="hover:bg-slate-50/30 transition-colors">
+                            <tr
+                              key={node.abbr}
+                              className={`transition-all duration-150 ${
+                                isActive
+                                  ? "hover:bg-slate-50/30"
+                                  : "bg-[#16171A]/90 opacity-60 hover:opacity-85 border-l-4 border-l-slate-600"
+                              }`}
+                            >
+                              <td className="p-3 text-center whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={isActive}
+                                  onClick={() => handleToggleNode(node.abbr, !isActive)}
+                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                                    isActive ? "bg-[#2ea043]" : "bg-[#383A42] border-[#565A66]"
+                                  }`}
+                                  title={
+                                    isActive
+                                      ? `Indicator ${node.abbr} is ACTIVE (included in network graph). Click to turn OFF.`
+                                      : `Indicator ${node.abbr} is LIGHTS OFF (excluded from network graph and simulation). Click to turn ON.`
+                                  }
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-xs ring-0 transition duration-200 ease-in-out ${
+                                      isActive ? "translate-x-4 bg-white" : "translate-x-0 bg-[#858892]"
+                                    }`}
+                                  />
+                                </button>
+                              </td>
                               <td className="p-3">
-                                <span className="inline-block px-2 py-0.5 rounded bg-slate-800 text-white font-mono font-bold text-xs">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-xs ${
+                                    isActive
+                                      ? "bg-slate-800 text-white font-bold border border-slate-700"
+                                      : "bg-[#202126] text-slate-500 font-bold border border-slate-800 line-through decoration-slate-600"
+                                  }`}
+                                >
                                   {node.abbr}
                                 </span>
                               </td>
-                              <td className="p-3 font-medium font-sans">{node.full_name}</td>
+                              <td className="p-3 font-medium font-sans">
+                                <div className="flex items-center gap-2">
+                                  <span className={isActive ? "text-[#F1F3F5]" : "text-slate-400 line-through decoration-slate-600"}>
+                                    {node.full_name}
+                                  </span>
+                                  {!isActive && (
+                                    <span className="inline-flex items-center gap-1 text-[9px] font-mono px-2 py-0.5 rounded-full bg-[#202126] text-slate-400 border border-slate-700 font-medium whitespace-nowrap shadow-2xs">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                                      Lights Off (Excluded)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="p-3">
-                                <span className="bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded-full font-sans">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-sans ${
+                                  isActive ? "bg-slate-100 text-slate-700" : "bg-[#202126] text-slate-500 border border-slate-800"
+                                }`}>
                                   {node.domain_id} — {dName}
                                 </span>
                               </td>
-                              <td className="p-3 text-center font-mono">{node.theta ?? 0.2}</td>
-                              <td className="p-3 text-center font-mono">{node.recovery_rate ?? 0.05}</td>
+                              <td className={`p-3 text-center font-mono ${isActive ? "text-slate-200" : "text-slate-500 line-through"}`}>
+                                {node.theta ?? 0.2}
+                              </td>
+                              <td className={`p-3 text-center font-mono ${isActive ? "text-slate-200" : "text-slate-500 line-through"}`}>
+                                {node.recovery_rate ?? 0.05}
+                              </td>
                               <td className="p-3 text-right">
                                 <div className="flex gap-2 justify-end">
                                   <button
@@ -1351,13 +1489,15 @@ export default function ConfigPage() {
                                         recovery_rate: node.recovery_rate ?? 0.05
                                       });
                                     }}
-                                    className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-md transition-colors"
+                                    className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-200 rounded-md transition-colors"
+                                    title="Edit indicator"
                                   >
                                     <Edit3 size={12} />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteNode(node.abbr)}
                                     className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                                    title="Delete indicator"
                                   >
                                     <Trash2 size={12} />
                                   </button>
@@ -1382,7 +1522,7 @@ export default function ConfigPage() {
                   Create Directed Causal Influence (Edge)
                 </h3>
                 <form onSubmit={handleAddEdge} className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
-                  <div className="sm:col-span-4 space-y-1">
+                  <div className="sm:col-span-3 space-y-1">
                     <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Source Node (Causes impact)</label>
                     <select
                       value={edgeForm.source}
@@ -1402,7 +1542,7 @@ export default function ConfigPage() {
                     <ArrowRight size={16} />
                   </div>
 
-                  <div className="sm:col-span-4 space-y-1">
+                  <div className="sm:col-span-3 space-y-1">
                     <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Target Node (Receives impact)</label>
                     <select
                       value={edgeForm.target}
@@ -1418,7 +1558,22 @@ export default function ConfigPage() {
                     </select>
                   </div>
 
-                  <div className="sm:col-span-3">
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="text-slate-500 text-[10px] font-mono uppercase tracking-wider">Edge Weight</label>
+                    <select
+                      value={edgeForm.weight_label}
+                      onChange={(e) => setEdgeForm({ ...edgeForm, weight_label: e.target.value as EdgeWeightLabel })}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none font-medium"
+                      id="create-edge-weight-select"
+                    >
+                      <option value="Unweighted">Unweighted ({Number(edgeWeightMapping.unweighted).toFixed(2)})</option>
+                      <option value="High">High ({Number(edgeWeightMapping.High).toFixed(2)})</option>
+                      <option value="Medium">Medium ({Number(edgeWeightMapping.Medium).toFixed(2)})</option>
+                      <option value="Low">Low ({Number(edgeWeightMapping.Low).toFixed(2)})</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
                     <button
                       type="submit"
                       className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
@@ -1465,39 +1620,77 @@ export default function ConfigPage() {
                         <th className="p-3 font-semibold">Source (u)</th>
                         <th className="p-3 font-semibold text-center">Direction</th>
                         <th className="p-3 font-semibold">Target (v)</th>
-                        <th className="p-3 font-semibold">Type</th>
+                        <th className="p-3 font-semibold whitespace-nowrap">Type</th>
+                        <th className="p-3 font-semibold whitespace-nowrap">Weight</th>
                         <th className="p-3 font-semibold text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {filteredEdges.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400">No matching directed edges found.</td>
+                          <td colSpan={6} className="p-8 text-center text-slate-400">No matching directed edges found.</td>
                         </tr>
                       ) : (
                         filteredEdges.map((edge) => {
                           const sNode = nodes.find(n => n.abbr === edge.source);
                           const tNode = nodes.find(n => n.abbr === edge.target);
                           const isIntraDomain = sNode && tNode && sNode.domain_id === tNode.domain_id;
+                          const currentWeightLabel = (edge.weight_label || "Unweighted") as EdgeWeightLabel;
+                          const isEdgeActive = (sNode?.enabled !== false) && (tNode?.enabled !== false);
                           return (
-                            <tr key={edge.id} className="hover:bg-slate-50/30 transition-colors">
+                            <tr
+                              key={edge.id}
+                              className={`transition-colors ${
+                                isEdgeActive ? "hover:bg-slate-50/30" : "opacity-55 bg-[#1E1F23]/60"
+                              }`}
+                            >
                               <td className="p-3">
-                                <span className="font-mono font-bold text-slate-900">{edge.source}</span>
+                                <span className={`font-mono font-bold ${sNode?.enabled !== false ? "text-[#F1F3F5]" : "text-slate-500 line-through"}`}>
+                                  {edge.source}
+                                </span>
                                 <span className="text-slate-400 text-[10px] ml-1">({sNode?.full_name || "Unknown"})</span>
                               </td>
                               <td className="p-3 text-center text-slate-400">
                                 <ArrowRight size={13} className="inline" />
                               </td>
                               <td className="p-3">
-                                <span className="font-mono font-bold text-slate-900">{edge.target}</span>
+                                <span className={`font-mono font-bold ${tNode?.enabled !== false ? "text-[#F1F3F5]" : "text-slate-500 line-through"}`}>
+                                  {edge.target}
+                                </span>
                                 <span className="text-slate-400 text-[10px] ml-1">({tNode?.full_name || "Unknown"})</span>
                               </td>
-                              <td className="p-3">
-                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              <td className="p-3 whitespace-nowrap">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap inline-block ${
                                   isIntraDomain ? "bg-red-50 text-red-700 border border-red-100" : "bg-slate-100 text-slate-600"
                                 }`}>
                                   {isIntraDomain ? "Intra-Domain" : "Inter-Domain"}
                                 </span>
+                                {!isEdgeActive && (
+                                  <span className="text-[9px] font-mono px-1.5 py-0.2 bg-slate-800 text-slate-400 rounded border border-slate-700 ml-1.5" title="Excluded from graph because source or target indicator is turned off">
+                                    Node Off
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 whitespace-nowrap">
+                                <select
+                                  value={currentWeightLabel}
+                                  onChange={(e) => handleUpdateEdgeWeight(edge.id, e.target.value as EdgeWeightLabel)}
+                                  className={`text-[10px] px-2.5 py-0.5 rounded-full font-semibold border cursor-pointer transition-all focus:outline-none focus:ring-1 focus:ring-slate-400 whitespace-nowrap inline-block shadow-2xs ${
+                                    currentWeightLabel === "High"
+                                      ? "bg-[#064E3B] text-[#34D399] border-[#059669] hover:bg-[#065F46]"
+                                      : currentWeightLabel === "Medium"
+                                      ? "bg-[#422006] text-[#FDE047] border-[#CA8A04] hover:bg-[#713F12]"
+                                      : currentWeightLabel === "Low"
+                                      ? "bg-[#4C0519] text-[#FDA4AF] border-[#E11D48] hover:bg-[#881337]"
+                                      : "bg-[#E2E8F0] text-[#1E293B] border-[#CBD5E1] hover:bg-white"
+                                  }`}
+                                  title="Change edge weight tier (High: green, Medium: yellow, Low: red, Unweighted: light gray)"
+                                >
+                                  <option value="Unweighted" className="bg-[#25262B] text-slate-200">Unweighted</option>
+                                  <option value="High" className="bg-[#25262B] text-emerald-400">High</option>
+                                  <option value="Medium" className="bg-[#25262B] text-yellow-300">Medium</option>
+                                  <option value="Low" className="bg-[#25262B] text-rose-400">Low</option>
+                                </select>
                               </td>
                               <td className="p-3 text-right">
                                 <button
@@ -1564,18 +1757,22 @@ export default function ConfigPage() {
                 </div>
 
                 <div className="bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center min-h-[520px] overflow-auto p-4" id="network-map-stage">
-                  {nodes.length === 0 ? (
+                  {activeNodes.length === 0 ? (
                     <div className="p-8 text-center space-y-3 max-w-sm">
-                      <Network size={40} className="text-slate-300 mx-auto stroke-1" />
-                      <h3 className="text-xs font-bold text-slate-700">No nodes configured</h3>
+                      <Network size={40} className="text-slate-400 mx-auto stroke-1" />
+                      <h3 className="text-xs font-bold text-slate-300">
+                        {nodes.length === 0 ? "No nodes configured" : "No active indicators in network"}
+                      </h3>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
-                        Please import the default network or add indicator nodes to visualize the structure.
+                        {nodes.length === 0
+                          ? "Please import the default network or add indicator nodes to visualize the structure."
+                          : "All indicator nodes are currently turned off. Switch indicators ON in the Indicator Registry to visualize them and their connected edges in the graph."}
                       </p>
                     </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <img
-                        src={generateStaticNetworkSvg(nodes, edges, domains)}
+                        src={generateStaticNetworkSvg(activeNodes, activeEdges, domains)}
                         alt="Resilience Network Architecture Map"
                         style={{ width: `${networkScale}%` }}
                         className="h-auto object-contain drop-shadow-xs select-none transition-all duration-200"

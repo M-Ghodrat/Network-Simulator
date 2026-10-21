@@ -10,13 +10,31 @@ export interface NodeIndicator {
   domain_id: string; // "1" to "7"
   theta?: number; // threshold (theta_v)
   recovery_rate?: number; // recovery_rate (r_v)
+  enabled?: boolean; // active status (default true; false = turned off / excluded from graph)
 }
+
+export type EdgeWeightLabel = "High" | "Medium" | "Low" | "Unweighted";
+
+export interface EdgeWeightMapping {
+  unweighted: number;
+  High: number;
+  Medium: number;
+  Low: number;
+}
+
+export const DEFAULT_EDGE_WEIGHT_MAPPING: EdgeWeightMapping = {
+  unweighted: 1.0,
+  High: 0.9,
+  Medium: 0.65,
+  Low: 0.3
+};
 
 export interface Edge {
   id: string; // unique ID
   source: string; // source node id (abbr)
   target: string; // target node id (abbr)
-  weight?: number; // optional edge weight
+  weight?: number; // mapped numeric edge weight multiplier
+  weight_label?: EdgeWeightLabel | string; // "High" | "Medium" | "Low" | "Unweighted"
 }
 
 export interface Intervention {

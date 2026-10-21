@@ -171,6 +171,14 @@ export default function SimulatorPage() {
     };
   }, []);
 
+  // Filtered active nodes & edges (turned-off nodes & their edges are excluded from simulation)
+  const activeNodes = useMemo(() => nodes.filter((n) => n.enabled !== false), [nodes]);
+  const activeNodeAbbrs = useMemo(() => new Set(activeNodes.map((n) => n.abbr)), [activeNodes]);
+  const activeEdges = useMemo(
+    () => edges.filter((e) => activeNodeAbbrs.has(e.source) && activeNodeAbbrs.has(e.target)),
+    [edges, activeNodeAbbrs]
+  );
+
   // Handle playing animation
   useEffect(() => {
     if (isPlaying && simResult) {
@@ -308,9 +316,9 @@ export default function SimulatorPage() {
       return;
     }
 
-    // Node-level validation check
+    // Node-level validation check (only validate active indicators)
     if (parameterMode === "node") {
-      const missingNodes = nodes.filter(
+      const missingNodes = activeNodes.filter(
         n => typeof n.theta !== "number" || isNaN(n.theta) || typeof n.recovery_rate !== "number" || isNaN(n.recovery_rate)
       );
       if (missingNodes.length > 0) {
@@ -319,7 +327,7 @@ export default function SimulatorPage() {
         setModal({
           isOpen: true,
           title: "Node-Level Parameters Missing",
-          message: `The following indicator(s) are missing Failure Threshold (θ) or Passive Recovery (rv): ${missingAbbrs}${extraCount}. Please switch to "Network-Level" parameters or set individual values for all nodes in the Network Configuration tab.`,
+          message: `The following active indicator(s) are missing Failure Threshold (θ) or Passive Recovery (rv): ${missingAbbrs}${extraCount}. Please switch to "Network-Level" parameters or set individual values for all nodes in the Network Configuration tab.`,
           confirmText: "Switch to Network-Level",
           cancelText: "Cancel",
           showCancel: true,
@@ -341,15 +349,17 @@ export default function SimulatorPage() {
     // Save current parameters to Firestore/Local
     await saveCurrentParams();
 
-    // Prepare payload
+    // Prepare payload for active network only
     const payloadShocks: Record<string, number> = {};
     shocks.forEach((s) => {
-      payloadShocks[s.node] = s.intensity;
+      if (activeNodeAbbrs.has(s.node)) {
+        payloadShocks[s.node] = s.intensity;
+      }
     });
 
     const payload: SimulationPayload = {
-      nodes,
-      edges,
+      nodes: activeNodes,
+      edges: activeEdges,
       domains,
       params: {
         shocks: payloadShocks,
@@ -359,7 +369,7 @@ export default function SimulatorPage() {
         default_theta: theta,
         default_recovery_rate: rv,
         parameter_mode: parameterMode,
-        interventions
+        interventions: interventions.filter(i => activeNodeAbbrs.has(i.node))
       }
     };
 
@@ -575,7 +585,7 @@ export default function SimulatorPage() {
                 onChange={(e) => setNewShockNode(e.target.value)}
                 className="flex-1 min-w-0 py-1 px-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-slate-900 font-mono"
               >
-                {nodes.map((n) => (
+                {activeNodes.map((n) => (
                   <option key={n.abbr} value={n.abbr}>
                     {n.abbr} — {n.full_name}
                   </option>
@@ -797,7 +807,7 @@ export default function SimulatorPage() {
                 onChange={(e) => setNewIntervNode(e.target.value)}
                 className="col-span-5 py-1 px-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none font-mono"
               >
-                {nodes.map((n) => (
+                {activeNodes.map((n) => (
                   <option key={n.abbr} value={n.abbr}>{n.abbr}</option>
                 ))}
               </select>
@@ -1108,7 +1118,7 @@ export default function SimulatorPage() {
                       className="py-0.5 px-1 bg-slate-50 border border-slate-200 rounded text-[9px] font-mono focus:outline-none"
                     >
                       <option value="">+ Add Chart Node</option>
-                      {nodes.map(n => (
+                      {activeNodes.map(n => (
                         <option key={n.abbr} value={n.abbr}>{n.abbr}</option>
                       ))}
                     </select>

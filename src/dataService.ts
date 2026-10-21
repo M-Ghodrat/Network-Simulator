@@ -11,7 +11,10 @@ import {
   AppUserAccount, 
   DEFAULT_USER_ACCOUNTS, 
   LearnVisibilityConfig, 
-  DEFAULT_LEARN_VISIBILITY 
+  DEFAULT_LEARN_VISIBILITY,
+  EdgeWeightMapping,
+  DEFAULT_EDGE_WEIGHT_MAPPING,
+  EdgeWeightLabel
 } from "./types";
 import { 
   DEFAULT_DOMAINS, 
@@ -54,6 +57,7 @@ class DataService {
   private limits: SimulationLimitsConfig = { ...DEFAULT_SIMULATION_LIMITS };
   private accounts: AppUserAccount[] = [...DEFAULT_USER_ACCOUNTS];
   private learnVisibility: LearnVisibilityConfig = { ...DEFAULT_LEARN_VISIBILITY };
+  private edgeWeightMapping: EdgeWeightMapping = { ...DEFAULT_EDGE_WEIGHT_MAPPING };
   private isLocalOnly = false;
   private isQuotaExhausted = false;
   private isLoaded = false;
@@ -69,11 +73,13 @@ class DataService {
   private limitsListeners: Set<(l: SimulationLimitsConfig) => void> = new Set();
   private accountsListeners: Set<(accs: AppUserAccount[]) => void> = new Set();
   private learnVisibilityListeners: Set<(v: LearnVisibilityConfig) => void> = new Set();
+  private edgeWeightListeners: Set<(m: EdgeWeightMapping) => void> = new Set();
 
   private unsubs: (() => void)[] = [];
   private systemUnsub: (() => void) | null = null;
   private accountsUnsub: (() => void) | null = null;
   private learnVisibilityUnsub: (() => void) | null = null;
+  private edgeWeightUnsub: (() => void) | null = null;
 
   constructor() {
     this.init();
@@ -113,10 +119,12 @@ class DataService {
     this.loadFromLocalStorage();
     this.loadAccountsFromLocalStorage();
     this.loadLearnVisibilityFromLocalStorage();
+    this.loadEdgeWeightMappingFromLocalStorage();
     if (!this.isQuotaExhausted) {
       this.initSystemLimitsListener();
       this.initAccountsListener();
       this.initLearnVisibilityListener();
+      this.initEdgeWeightMappingListener();
     }
   }
 
@@ -930,7 +938,13 @@ class DataService {
             if (docSnap.id.startsWith("_")) return;
             const edge = docSnap.data() as Edge;
             if ((edge as any).placeholder) return;
-            list.push(edge);
+            const weight_label = (edge.weight_label || "Unweighted") as EdgeWeightLabel;
+            const weight = edge.weight !== undefined ? edge.weight : this.getMappedEdgeWeight(weight_label);
+            list.push({
+              ...edge,
+              weight_label,
+              weight
+            });
           });
           this.edges = list;
 
@@ -1053,7 +1067,15 @@ class DataService {
           }
         }
         this.nodes = normalizedList;
-        this.edges = loadedEdges;
+        this.edges = (loadedEdges || []).map((e: any) => {
+          const weight_label = (e.weight_label || "Unweighted") as EdgeWeightLabel;
+          const weight = e.weight !== undefined ? e.weight : this.getMappedEdgeWeight(weight_label);
+          return {
+            ...e,
+            weight_label,
+            weight
+          };
+        });
 
         if (savedParams) {
           this.params = JSON.parse(savedParams);
@@ -1267,6 +1289,137 @@ class DataService {
     await this.saveLearnVisibility(DEFAULT_LEARN_VISIBILITY);
   }
 
+  // --- Edge Weight Multipliers Configuration ---
+
+  private loadEdgeWeightMappingFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem("ursa_edge_weight_mapping");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        this.edgeWeightMapping = {
+          ...DEFAULT_EDGE_WEIGHT_MAPPING,
+          ...parsed
+        };
+      }
+    } catch (e) {
+      this.edgeWeightMapping = { ...DEFAULT_EDGE_WEIGHT_MAPPING };
+    }
+  }
+
+  private initEdgeWeightMappingListener() {
+    try {
+      if (this.edgeWeightUnsub) {
+        this.edgeWeightUnsub();
+      }
+      this.edgeWeightUnsub = onSnapshot(
+        doc(db, "system", "edge_weight_mapping"),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as Partial<EdgeWeightMapping>;
+            this.edgeWeightMapping = {
+              ...DEFAULT_EDGE_WEIGHT_MAPPING,
+              ...data
+            };
+          }
+          this.notifyEdgeWeightListeners();
+          this.updateEdgesWithMapping();
+          try {
+            localStorage.setItem("ursa_edge_weight_mapping", JSON.stringify(this.edgeWeightMapping));
+          } catch (e) {
+            // LocalStorage blocked
+          }
+        },
+        (err) => {
+          this.handleFirestoreError(err, "system edge weight mapping listener");
+        }
+      );
+    } catch (e) {
+      this.handleFirestoreError(e, "attach edge weight mapping listener");
+    }
+  }
+
+  private notifyEdgeWeightListeners() {
+    this.edgeWeightListeners.forEach((listener) => listener({ ...this.edgeWeightMapping }));
+  }
+
+  public subscribeEdgeWeightMapping(listener: (m: EdgeWeightMapping) => void): () => void {
+    this.edgeWeightListeners.add(listener);
+    listener({ ...this.edgeWeightMapping });
+    return () => this.edgeWeightListeners.delete(listener);
+  }
+
+  public getEdgeWeightMapping(): EdgeWeightMapping {
+    return { ...this.edgeWeightMapping };
+  }
+
+  public getMappedEdgeWeight(label?: string | null, mapping?: EdgeWeightMapping): number {
+    const map = mapping || this.edgeWeightMapping || DEFAULT_EDGE_WEIGHT_MAPPING;
+    if (!label) return map.unweighted ?? 1.0;
+    const l = String(label).trim().toLowerCase();
+    if (l === "high") return map.High ?? 0.9;
+    if (l === "medium" || l === "med") return map.Medium ?? 0.65;
+    if (l === "low") return map.Low ?? 0.3;
+    if (l === "unweighted") return map.unweighted ?? 1.0;
+    return map.unweighted ?? 1.0;
+  }
+
+  public async saveEdgeWeightMapping(newMapping: EdgeWeightMapping): Promise<void> {
+    this.edgeWeightMapping = { ...newMapping };
+    this.notifyEdgeWeightListeners();
+    this.updateEdgesWithMapping();
+    try {
+      localStorage.setItem("ursa_edge_weight_mapping", JSON.stringify(this.edgeWeightMapping));
+    } catch (e) {
+      console.warn("Failed to write edge weight mapping to localStorage:", e);
+    }
+
+    if (!this.isLocalOnly && !this.isQuotaExhausted) {
+      try {
+        await setDoc(doc(db, "system", "edge_weight_mapping"), newMapping);
+      } catch (e) {
+        this.handleFirestoreError(e, "saveEdgeWeightMapping");
+      }
+    }
+  }
+
+  public async resetEdgeWeightMapping(): Promise<void> {
+    await this.saveEdgeWeightMapping(DEFAULT_EDGE_WEIGHT_MAPPING);
+  }
+
+  private updateEdgesWithMapping() {
+    let changed = false;
+    const updatedEdges = this.edges.map((e) => {
+      const label = (e.weight_label || "Unweighted") as EdgeWeightLabel;
+      const mapped = this.getMappedEdgeWeight(label);
+      if (e.weight !== mapped || !e.weight_label) {
+        changed = true;
+        return {
+          ...e,
+          weight_label: label,
+          weight: mapped
+        };
+      }
+      return e;
+    });
+    if (changed) {
+      this.edges = updatedEdges;
+      this.saveToLocalStorageOnly();
+      this.notifyEdgeListeners();
+    }
+  }
+
+  public normalizeEdges(edges: Edge[]): Edge[] {
+    return (edges || []).map((edge: any) => {
+      const weight_label = (edge.weight_label || "Unweighted") as EdgeWeightLabel;
+      const weight = edge.weight !== undefined ? edge.weight : this.getMappedEdgeWeight(weight_label);
+      return {
+        ...edge,
+        weight_label,
+        weight
+      };
+    });
+  }
+
   // --- Subscriptions for Core App Data ---
 
   public subscribeDomains(listener: Listener<Domain>): () => void {
@@ -1398,6 +1551,17 @@ class DataService {
     }
   }
 
+  public async toggleNodeActive(abbr: string, enabled: boolean) {
+    const uppercaseId = abbr.toUpperCase();
+    const existing = this.nodes.find(n => n.abbr.toUpperCase() === uppercaseId || n.id.toUpperCase() === uppercaseId);
+    if (!existing) return;
+    const updatedNode: NodeIndicator = {
+      ...existing,
+      enabled
+    };
+    await this.saveNode(updatedNode);
+  }
+
   public async deleteNode(id: string) {
     const uppercaseId = id.toUpperCase();
     const edgesToDelete = this.edges.filter(edge => edge.source.toUpperCase() === uppercaseId || edge.target.toUpperCase() === uppercaseId);
@@ -1437,9 +1601,19 @@ class DataService {
   }
 
   public async saveEdge(edge: Edge) {
-    const exists = this.edges.some(e => e.id === edge.id);
+    const weight_label = (edge.weight_label || "Unweighted") as EdgeWeightLabel;
+    const weight = edge.weight !== undefined ? edge.weight : this.getMappedEdgeWeight(weight_label);
+    const normalizedEdge: Edge = {
+      ...edge,
+      weight_label,
+      weight
+    };
+
+    const exists = this.edges.some(e => e.id === normalizedEdge.id);
     if (!exists) {
-      this.edges = [...this.edges, edge];
+      this.edges = [...this.edges, normalizedEdge];
+    } else {
+      this.edges = this.edges.map(e => e.id === normalizedEdge.id ? normalizedEdge : e);
     }
     this.saveToLocalStorageOnly();
     this.notifyEdgeListeners();
@@ -1447,7 +1621,7 @@ class DataService {
     const userName = this.getCurrentUserName();
     if (!this.isLocalOnly && !this.isQuotaExhausted && userName && userName !== "global") {
       try {
-        await setDoc(doc(db, "users", userName, "edges", edge.id), edge);
+        await setDoc(doc(db, "users", userName, "edges", normalizedEdge.id), normalizedEdge);
       } catch (e) {
         this.handleFirestoreError(e, `saveEdge for ${userName}`);
       }
@@ -1600,7 +1774,7 @@ class DataService {
             if (snap.exists()) {
               const data = snap.data() as SavedNetworkConfig;
               if (data && data.domains && data.domains.length > 0) {
-                return data;
+                return { ...data, edges: this.normalizeEdges(data.edges) };
               }
             }
           } catch (err: any) {
@@ -1624,7 +1798,7 @@ class DataService {
               if (snap.exists()) {
                 const data = snap.data() as SavedNetworkConfig;
                 if (data && data.domains && data.domains.length > 0) {
-                  return data;
+                  return { ...data, edges: this.normalizeEdges(data.edges) };
                 }
               }
             }
@@ -1641,7 +1815,7 @@ class DataService {
               for (const docSnap of collSnap.docs) {
                 const data = docSnap.data() as SavedNetworkConfig;
                 if (data && data.domains && data.domains.length > 0) {
-                  return data;
+                  return { ...data, edges: this.normalizeEdges(data.edges) };
                 }
               }
             }
@@ -1709,7 +1883,7 @@ class DataService {
                   savedAt: recordedTime || "Original Setup",
                   domains: dList,
                   nodes: nList,
-                  edges: eList,
+                  edges: this.normalizeEdges(eList),
                   params: p
                 };
               }
@@ -1737,7 +1911,7 @@ class DataService {
         if (saved) {
           const parsed = JSON.parse(saved) as SavedNetworkConfig;
           if (parsed && parsed.domains && parsed.domains.length > 0) {
-            return parsed;
+            return { ...parsed, edges: this.normalizeEdges(parsed.edges) };
           }
         }
       }
@@ -1774,7 +1948,7 @@ class DataService {
 
       this.domains = [...(config.domains || [])];
       this.nodes = normalizedNodes;
-      this.edges = [...(config.edges || [])];
+      this.edges = this.normalizeEdges(config.edges || []);
       this.params = config.params ? { ...config.params } : { ...this.params };
 
       const userName = this.getCurrentUserName();
