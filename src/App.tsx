@@ -14,6 +14,11 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"learn" | "config" | "simulator" | "settings">("learn");
 
+  // Ensure browser document title is URSA Studio
+  useEffect(() => {
+    document.title = "URSA Studio";
+  }, []);
+
   // Track Auth state
   useEffect(() => {
     // Check local storage first for a bypassed local user
