@@ -46,6 +46,7 @@
         "gamma": { "type": "number", "description": "Scaling constant for interaction intensity" },
         "epsilon": { "type": "number", "description": "Tolerance value for convergence" },
         "rv": { "type": "number", "description": "Global default recovery rate" },
+        "parameterMode": { "type": "string", "description": "Most recent simulator parameter scope: 'network' or 'node'" },
         "shocks": {
           "type": "array",
           "description": "List of active shocks applied to nodes"

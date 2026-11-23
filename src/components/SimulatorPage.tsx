@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
+import { NodeIndicator, Domain, Edge, Intervention, Shock, SimulationResult, SimulatorParams, SimulationLimitsConfig, DEFAULT_SIMULATION_LIMITS } from "../types";
 import { dataService } from "../dataService";
 import { runSimulationClient, SimulationPayload } from "../lib/simulationClient";
 import { 
@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Zap,
   Image as ImageIcon,
-  FileSpreadsheet
+  FileSpreadsheet,
+  CheckCircle
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -82,6 +83,8 @@ export default function SimulatorPage() {
   const [simResult, setSimResult] = useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [settingsExported, setSettingsExported] = useState(false);
+  const exportTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Last run configuration snapshot for change detection
   const [lastRunSignature, setLastRunSignature] = useState<string>("");
@@ -98,7 +101,15 @@ export default function SimulatorPage() {
   const [tableSearch, setTableSearch] = useState("");
   const [imageScale, setImageScale] = useState(100);
 
-  // Current parameter signature to detect when user modifies parameters
+  // Filtered active nodes & edges (turned-off nodes & their edges are excluded from simulation)
+  const activeNodes = useMemo(() => nodes.filter((n) => n.enabled !== false), [nodes]);
+  const activeNodeAbbrs = useMemo(() => new Set(activeNodes.map((n) => n.abbr)), [activeNodes]);
+  const activeEdges = useMemo(
+    () => edges.filter((e) => activeNodeAbbrs.has(e.source) && activeNodeAbbrs.has(e.target)),
+    [edges, activeNodeAbbrs]
+  );
+
+  // Current parameter signature to detect when user modifies parameters or active topology
   const currentSignature = useMemo(() => {
     return JSON.stringify({
       T,
@@ -107,12 +118,12 @@ export default function SimulatorPage() {
       epsilon: Number(epsilon.toFixed(5)),
       rv: Number(rv.toFixed(4)),
       parameterMode,
-      shocks: [...shocks].sort((a, b) => a.node.localeCompare(b.node)),
-      interventions: [...interventions].sort((a, b) => a.node.localeCompare(b.node) || a.wave - b.wave),
-      nodeCount: nodes.length,
-      edgeCount: edges.length
+      shocks: shocks.filter(s => activeNodeAbbrs.has(s.node)).sort((a, b) => a.node.localeCompare(b.node)),
+      interventions: interventions.filter(i => activeNodeAbbrs.has(i.node)).sort((a, b) => a.node.localeCompare(b.node) || a.wave - b.wave),
+      activeNodeIds: activeNodes.map(n => n.abbr).sort(),
+      activeEdgeIds: activeEdges.map(e => e.id).sort()
     });
-  }, [T, theta, gamma, epsilon, rv, parameterMode, shocks, interventions, nodes.length, edges.length]);
+  }, [T, theta, gamma, epsilon, rv, parameterMode, shocks, interventions, activeNodes, activeNodeAbbrs, activeEdges]);
 
   const hasUnrunChanges = useMemo(() => {
     return simResult !== null && lastRunSignature !== "" && lastRunSignature !== currentSignature;
@@ -127,11 +138,15 @@ export default function SimulatorPage() {
 
     const unsubNodes = dataService.subscribeNodes((list) => {
       setNodes(list);
-      // Select defaults for new items
-      if (list.length > 0) {
-        const defaultNode = list.find(n => n.abbr === "PF")?.abbr || list.find(n => n.abbr === "N2")?.abbr || list[0].abbr;
-        setNewShockNode((prev) => prev || defaultNode);
-        setNewIntervNode((prev) => prev || defaultNode);
+      const activeList = list.filter(n => n.enabled !== false);
+      // Select defaults for new items from active nodes
+      if (activeList.length > 0) {
+        const defaultNode = activeList.find(n => n.abbr === "PF")?.abbr || activeList.find(n => n.abbr === "N2")?.abbr || activeList[0].abbr;
+        setNewShockNode((prev) => (prev && activeList.some(n => n.abbr === prev)) ? prev : defaultNode);
+        setNewIntervNode((prev) => (prev && activeList.some(n => n.abbr === prev)) ? prev : defaultNode);
+      } else {
+        setNewShockNode("");
+        setNewIntervNode("");
       }
     });
 
@@ -171,14 +186,6 @@ export default function SimulatorPage() {
     };
   }, []);
 
-  // Filtered active nodes & edges (turned-off nodes & their edges are excluded from simulation)
-  const activeNodes = useMemo(() => nodes.filter((n) => n.enabled !== false), [nodes]);
-  const activeNodeAbbrs = useMemo(() => new Set(activeNodes.map((n) => n.abbr)), [activeNodes]);
-  const activeEdges = useMemo(
-    () => edges.filter((e) => activeNodeAbbrs.has(e.source) && activeNodeAbbrs.has(e.target)),
-    [edges, activeNodeAbbrs]
-  );
-
   // Handle playing animation
   useEffect(() => {
     if (isPlaying && simResult) {
@@ -205,24 +212,33 @@ export default function SimulatorPage() {
     };
   }, [isPlaying, simResult]);
 
+  // Cleanup export feedback timer on unmount
+  useEffect(() => {
+    return () => {
+      if (exportTimeoutRef.current) {
+        clearTimeout(exportTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Add default demo shock scenario on load if empty
   useEffect(() => {
-    if (nodes.length > 0 && shocks.length === 0) {
+    if (activeNodes.length > 0 && shocks.length === 0) {
       const defaultShocks: Shock[] = [];
       const defaultCharts: string[] = [];
       
-      if (nodes.some(n => n.abbr === "PF")) {
+      if (activeNodes.some(n => n.abbr === "PF")) {
         defaultShocks.push({ node: "PF", intensity: 0.4 });
         defaultCharts.push("PF");
-      } else if (nodes.some(n => n.abbr === "N2")) {
+      } else if (activeNodes.some(n => n.abbr === "N2")) {
         defaultShocks.push({ node: "N2", intensity: 0.4 });
         defaultCharts.push("N2");
       }
       
-      if (nodes.some(n => n.abbr === "BE")) {
+      if (activeNodes.some(n => n.abbr === "BE")) {
         defaultShocks.push({ node: "BE", intensity: 0.4 });
         defaultCharts.push("BE");
-      } else if (nodes.some(n => n.abbr === "N10")) {
+      } else if (activeNodes.some(n => n.abbr === "N10")) {
         defaultShocks.push({ node: "N10", intensity: 0.4 });
         defaultCharts.push("N10");
       }
@@ -234,7 +250,7 @@ export default function SimulatorPage() {
         setSelectedChartNodes(defaultCharts);
       }
     }
-  }, [nodes]);
+  }, [activeNodes]);
 
   // Keyboard shortcut: Cmd/Ctrl + Enter to trigger simulation
   useEffect(() => {
@@ -279,24 +295,32 @@ export default function SimulatorPage() {
   };
 
   const missingNodeCount = useMemo(() => {
-    return nodes.filter(
+    return activeNodes.filter(
       n => typeof n.theta !== "number" || isNaN(n.theta) || typeof n.recovery_rate !== "number" || isNaN(n.recovery_rate)
     ).length;
-  }, [nodes]);
+  }, [activeNodes]);
+
+  const buildCurrentParams = (overrides: Partial<SimulatorParams> = {}): SimulatorParams => ({
+    id: "default",
+    T,
+    theta,
+    gamma,
+    epsilon,
+    rv,
+    parameterMode,
+    shocks,
+    interventions,
+    ...overrides
+  });
+
+  const handleParameterModeChange = (mode: "network" | "node") => {
+    setParameterMode(mode);
+    dataService.saveParams(buildCurrentParams({ parameterMode: mode }));
+  };
 
   const saveCurrentParams = async () => {
     try {
-      await dataService.saveParams({
-        id: "default",
-        T,
-        theta,
-        gamma,
-        epsilon,
-        rv,
-        parameterMode,
-        shocks,
-        interventions
-      });
+      await dataService.saveParams(buildCurrentParams());
     } catch (e) {
       console.error("Failed to save params:", e);
     }
@@ -304,11 +328,13 @@ export default function SimulatorPage() {
 
   // Run Simulation execution
   const runSimulation = async () => {
-    if (nodes.length === 0) {
+    if (activeNodes.length === 0) {
       setModal({
         isOpen: true,
-        title: "No Indicators Found",
-        message: "No indicator nodes were loaded. Please load or seed your network in the Network Configuration tab first.",
+        title: nodes.length === 0 ? "No Indicators Found" : "No Active Indicators",
+        message: nodes.length === 0
+          ? "No indicator nodes were loaded. Please load or seed your network in the Network Configuration tab first."
+          : "All indicator nodes are currently turned off. Please switch at least one indicator ON in the Network Configuration tab.",
         type: "danger",
         showCancel: false,
         onConfirm: closeModal
@@ -333,7 +359,7 @@ export default function SimulatorPage() {
           showCancel: true,
           type: "danger",
           onConfirm: () => {
-            setParameterMode("network");
+            handleParameterModeChange("network");
             closeModal();
           }
         });
@@ -403,12 +429,14 @@ export default function SimulatorPage() {
     
     for (let t = 0; t < waveCount; t++) {
       const row: Record<string, any> = { wave: t };
-      selectedChartNodes.forEach((abbr) => {
-        const hist = simResult.history[abbr];
-        if (hist) {
-          row[abbr] = Number(hist[t].toFixed(3));
-        }
-      });
+      selectedChartNodes
+        .filter((abbr) => activeNodeAbbrs.has(abbr))
+        .forEach((abbr) => {
+          const hist = simResult.history[abbr];
+          if (hist) {
+            row[abbr] = Number(hist[t].toFixed(3));
+          }
+        });
       chartData.push(row);
     }
     return chartData;
@@ -429,16 +457,136 @@ export default function SimulatorPage() {
   };
 
   // Exporters
+  const exportSettingsCSV = () => {
+    const escapeCell = (val: string | number | undefined | null) => {
+      if (val === undefined || val === null) return "";
+      const str = String(val);
+      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const scopeLabel = parameterMode === "network" ? "network-level" : "node-level";
+    const activeShocks = shocks.filter((s) => activeNodeAbbrs.has(s.node));
+    const activeInterventions = interventions.filter((i) => activeNodeAbbrs.has(i.node));
+
+    const headers = ["Category", "Setting / Target", "Value", "Wave", "Details"];
+    const rows: (string | number)[][] = [
+      ["Metadata", "Exported At", new Date().toISOString(), "", "URSA Studio Simulation Settings"],
+      ["System Parameter", "Simulation Waves (T)", T, "", "Total propagation waves"],
+      ["System Parameter", "Centrality Dampening (gamma)", gamma, "", "Non-linear cascade dampening exponent"],
+      [
+        "System Parameter",
+        "Parameter Scope",
+        scopeLabel,
+        "",
+        parameterMode === "network"
+          ? "Applies globally across all active indicators"
+          : "Uses individual per-node theta and rv values"
+      ],
+      [
+        "System Parameter",
+        "Failure Threshold (theta)",
+        parameterMode === "network" ? theta : "node-level",
+        "",
+        parameterMode === "network"
+          ? "Global network-level failure threshold"
+          : "Defined individually per node (listed under Node Parameter)"
+      ],
+      [
+        "System Parameter",
+        "Passive Recovery (rv)",
+        parameterMode === "network" ? rv : "node-level",
+        "",
+        parameterMode === "network"
+          ? "Global network-level passive recovery rate"
+          : "Defined individually per node (listed under Node Parameter)"
+      ],
+      ["System Parameter", "Convergence Tolerance (epsilon)", epsilon, "", "Equilibrium stopping tolerance"],
+      ["Network Summary", "Active Indicators", activeNodes.length, "", "Inactive indicators excluded"],
+      ["Network Summary", "Active Directed Edges", activeEdges.length, "", "Edges of inactive indicators excluded"]
+    ];
+
+    if (activeShocks.length === 0) {
+      rows.push(["Acute Shock", "None", "", 0, "No acute shocks configured"]);
+    } else {
+      activeShocks.forEach((s) => {
+        const nodeObj = activeNodes.find((n) => n.abbr === s.node);
+        const nodeLabel = nodeObj ? `${nodeObj.full_name} ` : "";
+        rows.push([
+          "Acute Shock",
+          s.node,
+          s.intensity,
+          0,
+          `${nodeLabel}(-${(s.intensity * 100).toFixed(0)}% intensity)`
+        ]);
+      });
+    }
+
+    if (activeInterventions.length === 0) {
+      rows.push(["Intervention", "None", "", "", "No interventions scheduled"]);
+    } else {
+      activeInterventions.forEach((item) => {
+        const nodeObj = activeNodes.find((n) => n.abbr === item.node);
+        const nodeLabel = nodeObj ? `${nodeObj.full_name} ` : "";
+        rows.push([
+          "Intervention",
+          item.node,
+          item.strength,
+          item.wave,
+          `${nodeLabel}(+${item.strength} stability boost)`
+        ]);
+      });
+    }
+
+    if (parameterMode === "node") {
+      activeNodes.forEach((n) => {
+        const domainName = domains.find((d) => d.id === n.domain_id)?.name || `Domain ${n.domain_id}`;
+        const thetaVal = typeof n.theta === "number" && !isNaN(n.theta) ? n.theta : "missing";
+        const rvVal = typeof n.recovery_rate === "number" && !isNaN(n.recovery_rate) ? n.recovery_rate : "missing";
+        rows.push([
+          "Node Parameter",
+          n.abbr,
+          `theta=${thetaVal}; rv=${rvVal}`,
+          "",
+          `${n.full_name} (${domainName})`
+        ]);
+      });
+    }
+
+    const csvContent = "\uFEFF" + [
+      headers.map(escapeCell).join(","),
+      ...rows.map((row) => row.map(escapeCell).join(","))
+    ].join("\r\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ursa_simulation_settings_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setSettingsExported(true);
+    if (exportTimeoutRef.current) clearTimeout(exportTimeoutRef.current);
+    exportTimeoutRef.current = setTimeout(() => setSettingsExported(false), 2500);
+  };
+
   const downloadCSV = () => {
     if (!simResult) return;
     
     const waveCount = simResult.gsi.length;
+    const reportedNodes = activeNodes.filter((node) => simResult.history[node.abbr] !== undefined);
     let csvContent = "wave,node_abbr,node_name,domain,stability\n";
     
     for (let t = 0; t < waveCount; t++) {
-      nodes.forEach((node) => {
+      reportedNodes.forEach((node) => {
         const sVal = simResult.history[node.abbr]?.[t];
-        const sValStr = sVal !== undefined ? sVal.toFixed(4) : "1.0000";
+        if (sVal === undefined) return;
+        const sValStr = sVal.toFixed(4);
         const dName = domains.find(d => d.id === node.domain_id)?.name || node.domain_id;
         const nameEscaped = node.full_name.replace(/"/g, '""');
         const domainEscaped = dName.replace(/"/g, '""');
@@ -514,7 +662,7 @@ export default function SimulatorPage() {
     <div className="space-y-4 py-2 animate-fade-in" id="simulator-page">
       
       {/* TOP HEADER */}
-      <div className="bg-white p-3.5 border border-slate-200 rounded-xl shadow-xs flex items-center justify-between gap-3" id="simulator-header-bar">
+      <div className="bg-white p-3.5 border border-slate-200 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3" id="simulator-header-bar">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-indigo-50 text-indigo-700 rounded-lg shrink-0">
             <Zap size={18} />
@@ -523,6 +671,23 @@ export default function SimulatorPage() {
             <h1 className="text-sm font-bold text-slate-900 font-sans">Stress Cascade Simulator</h1>
             <p className="text-xs text-slate-500">Model non-linear cascading failures, shock propagation, and planned resilience interventions.</p>
           </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={exportSettingsCSV}
+            disabled={loadingNodes}
+            className={`flex items-center justify-center gap-1.5 px-3 py-1.5 font-semibold text-xs rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60 ${
+              settingsExported
+                ? "bg-[#2ea043] hover:bg-[#34D399] text-[#FFFFFF]"
+                : "bg-[#F1F3F5] hover:bg-[#D0D3D7] active:bg-[#B8BCC4] text-[#1E1F23]"
+            }`}
+            id="export-sim-settings-btn"
+            title="Export current simulation settings, shocks, and interventions as CSV"
+          >
+            {settingsExported ? <CheckCircle size={13} /> : <FileSpreadsheet size={13} />}
+            <span>{settingsExported ? "Settings Exported!" : "Export Settings (CSV)"}</span>
+          </button>
         </div>
       </div>
 
@@ -547,6 +712,16 @@ export default function SimulatorPage() {
                 Simulation Controls
               </h2>
             </div>
+            <button
+              type="button"
+              onClick={exportSettingsCSV}
+              disabled={loadingNodes}
+              className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer disabled:opacity-50"
+              title="Export current simulation settings as CSV"
+              id="controls-export-settings-btn"
+            >
+              <Download size={11} /> Export CSV
+            </button>
           </div>
 
           {/* THE ONLY RUN BUTTON - LOCATED DIRECTLY ABOVE SHOCK DROPDOWN */}
@@ -617,9 +792,9 @@ export default function SimulatorPage() {
             </div>
 
             {/* Shocks list */}
-            {shocks.length > 0 && (
+            {shocks.filter(s => activeNodeAbbrs.has(s.node)).length > 0 && (
               <div className="space-y-1.5 pt-1.5 max-h-28 overflow-y-auto pr-1" id="shocks-list">
-                {shocks.map((s) => {
+                {shocks.filter(s => activeNodeAbbrs.has(s.node)).map((s) => {
                   return (
                     <div key={s.node} className="flex items-center justify-between text-xs p-1.5 bg-rose-50/50 border border-rose-100 rounded-md font-mono">
                       <span className="font-bold text-rose-900">{s.node} (-{(s.intensity*100).toFixed(0)}%)</span>
@@ -684,7 +859,7 @@ export default function SimulatorPage() {
               <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-200/80 rounded-md">
                 <button
                   type="button"
-                  onClick={() => setParameterMode("network")}
+                  onClick={() => handleParameterModeChange("network")}
                   className={`py-1 text-[11px] font-medium rounded transition-all text-center ${
                     parameterMode === "network"
                       ? "bg-white text-slate-900 shadow-xs font-semibold"
@@ -695,7 +870,7 @@ export default function SimulatorPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setParameterMode("node")}
+                  onClick={() => handleParameterModeChange("node")}
                   className={`py-1 text-[11px] font-medium rounded transition-all text-center ${
                     parameterMode === "node"
                       ? "bg-white text-slate-900 shadow-xs font-semibold"
@@ -741,7 +916,13 @@ export default function SimulatorPage() {
                 step={limits.theta.step}
                 disabled={parameterMode === "node"}
                 value={Math.min(limits.theta.max, Math.max(limits.theta.min, theta))}
-                onChange={(e) => setTheta(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setTheta(val);
+                  dataService.updateParamsLocal(buildCurrentParams({ theta: val, parameterMode: "network" }));
+                }}
+                onPointerUp={(e) => dataService.saveParams(buildCurrentParams({ theta: Number(e.currentTarget.value), parameterMode: "network" }))}
+                onKeyUp={(e) => dataService.saveParams(buildCurrentParams({ theta: Number(e.currentTarget.value), parameterMode: "network" }))}
                 className={`w-full accent-indigo-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
               />
               <div className="flex justify-between text-[9px] text-slate-400 font-mono">
@@ -771,7 +952,13 @@ export default function SimulatorPage() {
                 step={limits.rv.step}
                 disabled={parameterMode === "node"}
                 value={Math.min(limits.rv.max, Math.max(limits.rv.min, rv))}
-                onChange={(e) => setRv(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setRv(val);
+                  dataService.updateParamsLocal(buildCurrentParams({ rv: val, parameterMode: "network" }));
+                }}
+                onPointerUp={(e) => dataService.saveParams(buildCurrentParams({ rv: Number(e.currentTarget.value), parameterMode: "network" }))}
+                onKeyUp={(e) => dataService.saveParams(buildCurrentParams({ rv: Number(e.currentTarget.value), parameterMode: "network" }))}
                 className={`w-full accent-emerald-600 ${parameterMode === "node" ? "cursor-not-allowed" : "cursor-pointer"}`}
               />
               <div className="flex justify-between text-[9px] text-slate-400 font-mono">
@@ -846,16 +1033,19 @@ export default function SimulatorPage() {
             </div>
 
             {/* Interventions list */}
-            {interventions.length > 0 && (
+            {interventions.filter(item => activeNodeAbbrs.has(item.node)).length > 0 && (
               <div className="space-y-1 max-h-24 overflow-y-auto pr-1" id="interventions-list">
-                {interventions.map((item, index) => (
-                  <div key={index} className="flex items-center justify-between text-[11px] p-1.5 bg-indigo-50/50 border border-indigo-100 rounded-md font-mono">
-                    <span className="text-indigo-900 font-semibold">{item.node} @ Wave {item.wave} (+{item.strength})</span>
-                    <button onClick={() => removeIntervention(index)} className="text-indigo-400 hover:text-indigo-700" title="Remove intervention">
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                ))}
+                {interventions.map((item, index) => {
+                  if (!activeNodeAbbrs.has(item.node)) return null;
+                  return (
+                    <div key={index} className="flex items-center justify-between text-[11px] p-1.5 bg-indigo-50/50 border border-indigo-100 rounded-md font-mono">
+                      <span className="text-indigo-900 font-semibold">{item.node} @ Wave {item.wave} (+{item.strength})</span>
+                      <button onClick={() => removeIntervention(index)} className="text-indigo-400 hover:text-indigo-700" title="Remove intervention">
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1058,16 +1248,19 @@ export default function SimulatorPage() {
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
                   <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wider text-slate-500">
                     <span>Vulnerable Indicators (S_v &lt; 0.3)</span>
-                    <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md font-bold">{simResult.vnc[selectedWave]} nodes</span>
+                    <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md font-bold">
+                      {simResult.vulnerable_nodes[selectedWave]?.filter(abbr => activeNodeAbbrs.has(abbr)).length ?? simResult.vnc[selectedWave]} nodes
+                    </span>
                   </div>
                   
-                  {simResult.vulnerable_nodes[selectedWave]?.length === 0 ? (
+                  {(simResult.vulnerable_nodes[selectedWave]?.filter(abbr => activeNodeAbbrs.has(abbr)).length ?? 0) === 0 ? (
                     <div className="text-[10px] text-emerald-600 font-sans font-semibold">No systems vulnerable. Network remains stable.</div>
                   ) : (
                     <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto" id="vuln-badges">
-                      {simResult.vulnerable_nodes[selectedWave]?.map((abbr) => {
-                        const nodeObj = nodes.find(n => n.abbr === abbr);
-                        const sVal = simResult.history[abbr]?.[selectedWave] ?? 1.0;
+                      {simResult.vulnerable_nodes[selectedWave]?.filter(abbr => activeNodeAbbrs.has(abbr)).map((abbr) => {
+                        const nodeObj = activeNodes.find(n => n.abbr === abbr);
+                        const sVal = simResult.history[abbr]?.[selectedWave];
+                        if (sVal === undefined) return null;
                         return (
                           <span
                             key={abbr}
@@ -1125,9 +1318,9 @@ export default function SimulatorPage() {
                   </div>
 
                   {/* Selected compare list */}
-                  {selectedChartNodes.length > 0 && (
+                  {selectedChartNodes.filter(abbr => activeNodeAbbrs.has(abbr)).length > 0 && (
                     <div className="flex flex-wrap gap-1 pb-1" id="comparison-node-filters">
-                      {selectedChartNodes.map((abbr) => (
+                      {selectedChartNodes.filter(abbr => activeNodeAbbrs.has(abbr)).map((abbr) => (
                         <span key={abbr} className="inline-flex items-center gap-1 text-[9px] font-mono font-semibold bg-indigo-50 text-indigo-700 px-1 rounded">
                           {abbr}
                           <button
@@ -1148,7 +1341,7 @@ export default function SimulatorPage() {
                         <XAxis dataKey="wave" fontSize={9} />
                         <YAxis domain={[0, 1]} fontSize={9} />
                         <Tooltip contentStyle={{ fontSize: 10, background: "white", borderRadius: 8 }} />
-                        {selectedChartNodes.map((abbr, idx) => {
+                        {selectedChartNodes.filter(abbr => activeNodeAbbrs.has(abbr)).map((abbr, idx) => {
                           const colors = ["#e11d48", "#16a34a", "#2563eb", "#ea580c", "#9333ea", "#0d9488"];
                           const color = colors[idx % colors.length];
                           return <Line key={abbr} type="monotone" dataKey={abbr} stroke={color} strokeWidth={1.5} dot={{ r: 1 }} />;
@@ -1213,10 +1406,11 @@ export default function SimulatorPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {nodes
-                          .filter(n => n.abbr.toLowerCase().includes(tableSearch.toLowerCase()) || n.full_name.toLowerCase().includes(tableSearch.toLowerCase()))
+                        {activeNodes
+                          .filter(n => simResult.history[n.abbr] !== undefined && (n.abbr.toLowerCase().includes(tableSearch.toLowerCase()) || n.full_name.toLowerCase().includes(tableSearch.toLowerCase())))
                           .map((node) => {
-                            const sVal = simResult.history[node.abbr]?.[selectedWave] ?? 1.0;
+                            const sVal = simResult.history[node.abbr]?.[selectedWave];
+                            if (sVal === undefined) return null;
                             return (
                               <tr key={node.abbr} className="hover:bg-slate-50/50">
                                 <td className="p-2 font-mono font-bold">{node.abbr}</td>

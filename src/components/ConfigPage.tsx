@@ -3,6 +3,7 @@ import {
   Domain, 
   NodeIndicator, 
   Edge, 
+  SimulatorParams,
   SavedNetworkConfig, 
   SimulationLimitsConfig, 
   DEFAULT_SIMULATION_LIMITS,
@@ -104,8 +105,9 @@ export default function ConfigPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [networkScale, setNetworkScale] = useState(100);
 
-  // Edge Weight Multipliers Mapping
+  // Edge Weight Multipliers Mapping & Simulator Parameters
   const [edgeWeightMapping, setEdgeWeightMapping] = useState<EdgeWeightMapping>({ ...DEFAULT_EDGE_WEIGHT_MAPPING });
+  const [simParams, setSimParams] = useState<SimulatorParams | null>(null);
 
   // Active user identification
   const currentUserName = dataService.getCurrentUserName();
@@ -217,6 +219,10 @@ export default function ConfigPage() {
       setEdgeWeightMapping(m);
     });
 
+    const unsubParams = dataService.subscribeParams((p) => {
+      setSimParams(p);
+    });
+
     return () => {
       unsubDomains();
       unsubNodes();
@@ -224,6 +230,7 @@ export default function ConfigPage() {
       unsubLimits();
       unsubStatus();
       unsubMapping();
+      unsubParams();
     };
   }, []);
 
@@ -385,7 +392,7 @@ export default function ConfigPage() {
     });
 
     return list;
-  }, [nodes, allMetrics, metricDomainFilter, metricNodeSearch, domains, sortBy, sortOrder]);
+  }, [activeNodes, allMetrics, metricDomainFilter, metricNodeSearch, domains, sortBy, sortOrder]);
 
   const showFeedback = (text: string, type: "success" | "error") => {
     setMessage({ text, type });
@@ -395,7 +402,7 @@ export default function ConfigPage() {
   // ==========================================
   // CSV & IMAGE EXPORT HELPERS
   // ==========================================
-  const downloadCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
+  const downloadCSV = (filename: string, headers: string[], rows: (string | number)[][], feedbackText?: string) => {
     const escapeCell = (val: string | number | undefined | null) => {
       if (val === undefined || val === null) return '""';
       const str = String(val);
@@ -419,38 +426,59 @@ export default function ConfigPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showFeedback(`Exported ${filename} successfully!`, "success");
+    showFeedback(feedbackText || `Exported ${filename} successfully!`, "success");
   };
 
   const exportNodesCSV = () => {
-    if (nodes.length === 0) {
-      showFeedback("No indicator nodes to export.", "error");
+    if (activeNodes.length === 0) {
+      showFeedback("No active indicator nodes to export.", "error");
       return;
     }
-    const headers = ["Abbreviation", "Full Name", "Domain ID", "Domain Name", "Failure Threshold (theta)", "Passive Recovery (rv)"];
-    const rows = nodes.map(n => {
+    // Default to node-level when user has not touched simulator yet (parameterMode is undefined);
+    // once simulator scope is set, respect the most recent parameter scope (network vs node level).
+    const useNetworkScope = simParams?.parameterMode === "network";
+    const networkTheta = simParams?.theta !== undefined ? simParams.theta : 0.2;
+    const networkRv = simParams?.rv !== undefined ? simParams.rv : 0.05;
+
+    const parameterScopeLabel = useNetworkScope ? "network-level" : "node-level";
+
+    const headers = [
+      "Abbreviation",
+      "Full Name",
+      "Domain ID",
+      "Domain Name",
+      "Failure Threshold (theta)",
+      "Passive Recovery (rv)",
+      "Parameter Scope"
+    ];
+    const rows = activeNodes.map(n => {
       const dName = domains.find(d => d.id === n.domain_id)?.name || `Domain ${n.domain_id}`;
       return [
         n.abbr,
         n.full_name,
         n.domain_id,
         dName,
-        n.theta ?? 0.2,
-        n.recovery_rate ?? 0.05
+        useNetworkScope ? networkTheta : (n.theta ?? 0.2),
+        useNetworkScope ? networkRv : (n.recovery_rate ?? 0.05),
+        parameterScopeLabel
       ];
     });
-    downloadCSV(`ursa_indicators_registry_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+    const filename = `ursa_indicators_registry_${new Date().toISOString().slice(0, 10)}.csv`;
+    const scopeDetail = useNetworkScope
+      ? `Network-Level scope: θ=${networkTheta}, r_v=${networkRv}`
+      : "Node-Level scope";
+    downloadCSV(filename, headers, rows, `Exported ${filename} successfully (${scopeDetail})!`);
   };
 
   const exportEdgesCSV = () => {
-    if (edges.length === 0) {
-      showFeedback("No directed edges to export.", "error");
+    if (activeEdges.length === 0) {
+      showFeedback("No active directed edges to export.", "error");
       return;
     }
     const headers = ["Edge ID", "Source (u)", "Source Name", "Target (v)", "Target Name", "Connection Type", "Weight Label", "Weight Multiplier"];
-    const rows = edges.map(e => {
-      const sNode = nodes.find(n => n.abbr === e.source);
-      const tNode = nodes.find(n => n.abbr === e.target);
+    const rows = activeEdges.map(e => {
+      const sNode = activeNodes.find(n => n.abbr === e.source);
+      const tNode = activeNodes.find(n => n.abbr === e.target);
       const isIntra = sNode && tNode && sNode.domain_id === tNode.domain_id;
       const weightLabel = e.weight_label || "Unweighted";
       const numWeight = e.weight !== undefined ? e.weight : dataService.getMappedEdgeWeight(weightLabel);
@@ -475,7 +503,7 @@ export default function ConfigPage() {
     }
     const headers = ["Domain ID", "Domain Name", "Total Assigned Indicators"];
     const rows = domains.map(d => {
-      const count = nodes.filter(n => n.domain_id === d.id).length;
+      const count = activeNodes.filter(n => n.domain_id === d.id).length;
       return [d.id, d.name, count];
     });
     downloadCSV(`ursa_domains_registry_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
@@ -1376,7 +1404,11 @@ export default function ConfigPage() {
                     <button
                       onClick={exportNodesCSV}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors shadow-2xs cursor-pointer ml-auto sm:ml-0"
-                      title="Download indicator registry as CSV file"
+                      title={
+                        simParams?.parameterMode === "network"
+                          ? `Download indicator registry as CSV using Simulator Network-Level scope (θ=${simParams.theta ?? 0.2}, r_v=${simParams.rv ?? 0.05})`
+                          : "Download indicator registry as CSV using Node-Level parameters"
+                      }
                     >
                       <FileSpreadsheet size={13} className="text-emerald-600" />
                       <span>Export CSV</span>
@@ -1530,7 +1562,7 @@ export default function ConfigPage() {
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none font-mono"
                     >
                       <option value="">-- Choose Source --</option>
-                      {nodes.map((n) => (
+                      {activeNodes.map((n) => (
                         <option key={n.abbr} value={n.abbr}>
                           {n.abbr} — {n.full_name}
                         </option>
@@ -1550,7 +1582,7 @@ export default function ConfigPage() {
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none font-mono"
                     >
                       <option value="">-- Choose Target --</option>
-                      {nodes.map((n) => (
+                      {activeNodes.map((n) => (
                         <option key={n.abbr} value={n.abbr}>
                           {n.abbr} — {n.full_name}
                         </option>
@@ -1589,7 +1621,11 @@ export default function ConfigPage() {
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
                   <div className="flex items-center gap-3 self-start sm:self-center">
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Adjacency Edges List</h3>
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">{filteredEdges.length} edges</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">
+                      {activeEdges.length !== edges.length
+                        ? `${activeEdges.length} active / ${edges.length} total`
+                        : `${filteredEdges.length} edges`}
+                    </span>
                   </div>
                   <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center">
                     <div className="relative w-full sm:w-56">

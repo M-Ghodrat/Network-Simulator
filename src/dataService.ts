@@ -1462,6 +1462,12 @@ class DataService {
 
   // --- CRUD Operations Mapped to Unique Username ---
 
+  public updateParamsLocal(p: SimulatorParams) {
+    this.params = p;
+    this.saveToLocalStorageOnly();
+    this.notifyParamsListeners();
+  }
+
   public async saveParams(p: SimulatorParams) {
     this.params = p;
     this.saveToLocalStorageOnly();
